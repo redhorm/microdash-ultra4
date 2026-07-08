@@ -9,6 +9,9 @@
 #include "core/simulator.h"
 #include "core/roadbook.h"
 #include "core/formatter.h"
+#include "core/driver.h"
+#include "core/race.h"
+#include "core/anim.h"
 
 void setUp() {}
 void tearDown() {}
@@ -50,13 +53,17 @@ static void test_roadbook_skips_multiple_waypoints() {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 9.78f - 9.0f, s.dist_to_next);
 }
 
-static void test_roadbook_loops_after_finish() {
+static void test_roadbook_finish_detection() {
+    // Lap looping is now owned by RaceController: past the finish the
+    // roadbook just reports the last waypoint as active/finished.
     Roadbook rb;
     VehicleState s;
     s.odo_mi = 12.10f;          // past FINISH @ 12.05
     rb.update(s);
-    TEST_ASSERT_EQUAL_INT(0, s.active_wp);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, s.odo_mi);
+    TEST_ASSERT_EQUAL_INT(rb.getCount() - 1, s.active_wp);
+    TEST_ASSERT_TRUE(rb.isFinished());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, s.dist_to_next);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 12.10f, s.odo_mi);  // odo untouched
 }
 
 static void test_roadbook_reset() {
@@ -163,6 +170,208 @@ static void test_sim_dt_clamp() {
     TEST_ASSERT_TRUE(sim.state.odo_mi < 0.1f);   // clamped to 200 ms
 }
 
+// ── Driver (roadbook-aware autopilot) ────────────────────────────────────────
+
+static void test_driver_brakes_into_danger_waypoint() {
+    Roadbook rb;
+    VehicleState s;
+    s.odo_mi = 5.64f;            // 0.03 mi before WP5 (L HAIRPIN @ 5.67)
+    rb.update(s);
+    TEST_ASSERT_EQUAL_INT(4, s.active_wp);
+    s.speed_mph = 60.0f;
+
+    Driver drv;
+    DriveInputs in = drv.compute(s, rb);
+    TEST_ASSERT_TRUE(in.brake > 0.5f);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, in.throttle);
+}
+
+static void test_driver_accelerates_on_straight() {
+    Roadbook rb;
+    VehicleState s;
+    s.odo_mi = 6.0f;             // 2.34 mi of room before WP6 (R 90 @ 8.34)
+    rb.update(s);
+    s.speed_mph = 30.0f;
+
+    Driver drv;
+    DriveInputs in = drv.compute(s, rb);
+    TEST_ASSERT_TRUE(in.throttle > 0.8f);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, in.brake);
+}
+
+static void test_driver_holds_corner_speed_at_apex() {
+    Roadbook rb;
+    VehicleState s;
+    s.odo_mi = 5.655f;           // 0.015 mi before the hairpin, already slow
+    rb.update(s);
+    s.speed_mph = 11.0f;         // just under DRV_TGT_HAIRPIN_MPH
+
+    Driver drv;
+    DriveInputs in = drv.compute(s, rb);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, in.brake);
+}
+
+static void test_driver_corner_speed_mapping() {
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, DRV_TGT_HAIRPIN_MPH,
+                             Driver::cornerSpeed(WaypointDir::HAIRPIN_L));
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, DRV_TGT_90_MPH,
+                             Driver::cornerSpeed(WaypointDir::RIGHT_90));
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, DRV_TGT_WATER_MPH,
+                             Driver::cornerSpeed(WaypointDir::WATER));
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, DRV_CRUISE_MPH,
+                             Driver::cornerSpeed(WaypointDir::FINISH));
+}
+
+// ── RaceController ───────────────────────────────────────────────────────────
+
+// Steps the controller in DASH_FRAME_MS increments, returns final time
+static uint32_t stepRace(RaceController& rc, Simulator& sim, Roadbook& rb,
+                         uint32_t from_ms, uint32_t duration_ms) {
+    uint32_t now = from_ms;
+    uint32_t end = from_ms + duration_ms;
+    while (now < end) {
+        now += DASH_FRAME_MS;
+        rc.update(now, sim, rb);
+    }
+    return now;
+}
+
+static void test_race_boot_then_live() {
+    Simulator sim;  sim.reset();
+    Roadbook rb;    rb.reset();
+    RaceController rc;
+    rc.reset(1000);
+
+    rc.update(1000 + DASH_FRAME_MS, sim, rb);
+    TEST_ASSERT_TRUE(rc.fx().phase == Phase::BOOT);
+
+    stepRace(rc, sim, rb, 1000 + DASH_FRAME_MS, BOOT_TOTAL_MS + 100);
+    TEST_ASSERT_TRUE(rc.fx().phase == Phase::LIVE);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, sim.state.odo_mi);
+}
+
+static void test_race_full_lap_finish_and_restart() {
+    Simulator sim;  sim.reset();
+    Roadbook rb;    rb.reset();
+    RaceController rc;
+    rc.reset(0);
+
+    // Run up to 30 simulated minutes; the demo driver must complete
+    // the 12.05 mi stage well within that.
+    uint32_t now = stepRace(rc, sim, rb, 0, BOOT_TOTAL_MS + 100);
+    bool finished = false;
+    for (int i = 0; i < 30 * 60000 / DASH_FRAME_MS && !finished; i++) {
+        now += DASH_FRAME_MS;
+        rc.update(now, sim, rb);
+        finished = rc.fx().phase == Phase::FINISH;
+    }
+    TEST_ASSERT_TRUE(finished);
+    TEST_ASSERT_TRUE(rc.stats().max_speed_mph > 30.0f);
+    TEST_ASSERT_TRUE(rc.stats().max_rpm > 4000.0f);
+    TEST_ASSERT_TRUE(rc.stats().stage_ms > 60000);
+
+    // After the hold the lap restarts from zero
+    stepRace(rc, sim, rb, now, FINISH_HOLD_MS + 200);
+    TEST_ASSERT_TRUE(rc.fx().phase == Phase::LIVE);
+    TEST_ASSERT_TRUE(sim.state.odo_mi < 0.5f);
+    TEST_ASSERT_EQUAL_INT(0, sim.state.active_wp);
+    TEST_ASSERT_TRUE(rc.stats().stage_ms < 5000);
+}
+
+static void test_race_alert_near_danger_waypoint() {
+    Simulator sim;  sim.reset();
+    Roadbook rb;    rb.reset();
+    RaceController rc;
+    rc.reset(0);
+    uint32_t now = stepRace(rc, sim, rb, 0, BOOT_TOTAL_MS + 100);
+
+    // Far from any danger waypoint → no alert
+    sim.state.odo_mi = 0.50f;
+    now += DASH_FRAME_MS;
+    rc.update(now, sim, rb);
+    TEST_ASSERT_FALSE(rc.fx().alert);
+
+    // 0.12 mi before WP2 (L 90 CAUTION @ 1.23, danger) → alert on
+    sim.state.odo_mi = 1.11f;
+    now += DASH_FRAME_MS;
+    rc.update(now, sim, rb);
+    TEST_ASSERT_TRUE(rc.fx().alert);
+    TEST_ASSERT_EQUAL_INT(2, rc.fx().alert_wp);
+    TEST_ASSERT_TRUE(rc.fx().alert_dist <= ALERT_DIST_MI);
+    TEST_ASSERT_EQUAL_STRING("L 90", rc.fx().alert_info);
+}
+
+static void test_race_gear_snap_progress() {
+    Simulator sim;  sim.reset();
+    Roadbook rb;    rb.reset();
+    RaceController rc;
+    rc.reset(0);
+    uint32_t now = stepRace(rc, sim, rb, 0, BOOT_TOTAL_MS + 100);
+
+    // Drive until the first gear change happens
+    float p_at_change = 1.0f;
+    for (int i = 0; i < 20000 / DASH_FRAME_MS; i++) {
+        now += DASH_FRAME_MS;
+        rc.update(now, sim, rb);
+        if (sim.state.gear > 1) { p_at_change = rc.fx().gear_snap_p; break; }
+    }
+    TEST_ASSERT_TRUE(sim.state.gear > 1);
+    TEST_ASSERT_TRUE(p_at_change < 1.0f);   // snap animation just started
+
+    // Well past GEAR_SNAP_MS (and no new change within a couple frames)
+    now += GEAR_SNAP_MS + 3 * DASH_FRAME_MS;
+    rc.update(now, sim, rb);
+    int g = sim.state.gear;
+    now += DASH_FRAME_MS;
+    rc.update(now, sim, rb);
+    if (sim.state.gear == g)
+        TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, rc.fx().gear_snap_p);
+}
+
+// ── Anim helpers ─────────────────────────────────────────────────────────────
+
+static void test_anim_progress() {
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, Anim::progress(100, 100, 200));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, Anim::progress(200, 100, 200));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, Anim::progress(400, 100, 200));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, Anim::progress(50, 100, 0));
+}
+
+static void test_anim_pulse() {
+    TEST_ASSERT_TRUE(Anim::pulse(0, 100));
+    TEST_ASSERT_TRUE(Anim::pulse(99, 100));
+    TEST_ASSERT_FALSE(Anim::pulse(100, 100));
+    TEST_ASSERT_TRUE(Anim::pulse(200, 100));
+}
+
+static void test_anim_triangle_and_snap() {
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, Anim::triangle(0.0f));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, Anim::triangle(0.5f));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, Anim::triangle(1.0f));
+
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, GEAR_SNAP_SCALE,
+                             Anim::snapScale(0.0f, GEAR_SNAP_SCALE));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f,
+                             Anim::snapScale(1.0f, GEAR_SNAP_SCALE));
+    // monotonically decreasing
+    float prev = GEAR_SNAP_SCALE;
+    for (float t = 0.1f; t <= 1.0f; t += 0.1f) {
+        float v = Anim::snapScale(t, GEAR_SNAP_SCALE);
+        TEST_ASSERT_TRUE(v <= prev + 0.001f);
+        prev = v;
+    }
+}
+
+static void test_anim_lerp565() {
+    TEST_ASSERT_EQUAL_INT(0x0000, Anim::lerp565(0x0000, 0xFFFF, 0.0f));
+    TEST_ASSERT_EQUAL_INT(0xFFFF, Anim::lerp565(0x0000, 0xFFFF, 1.0f));
+    uint16_t mid = Anim::lerp565(0x0000, 0xFFFF, 0.5f);
+    int r = (mid >> 11) & 31, g = (mid >> 5) & 63, b = mid & 31;
+    TEST_ASSERT_TRUE(r >= 14 && r <= 16);
+    TEST_ASSERT_TRUE(g >= 30 && g <= 32);
+    TEST_ASSERT_TRUE(b >= 14 && b <= 16);
+}
+
 // ── Formatter ────────────────────────────────────────────────────────────────
 
 static void test_fmt_speed() {
@@ -233,6 +442,16 @@ static void test_fmt_clock() {
     TEST_ASSERT_EQUAL_STRING("01:00:00", b);
 }
 
+static void test_fmt_race_time() {
+    char b[10];
+    Fmt::raceTime(b, 0);
+    TEST_ASSERT_EQUAL_STRING("00:00.0", b);
+    Fmt::raceTime(b, 263700);            // 4 min 23.7 s
+    TEST_ASSERT_EQUAL_STRING("04:23.7", b);
+    Fmt::raceTime(b, 59950);
+    TEST_ASSERT_EQUAL_STRING("00:59.9", b);
+}
+
 // ── Runner ───────────────────────────────────────────────────────────────────
 
 int main(int, char**) {
@@ -241,7 +460,7 @@ int main(int, char**) {
     RUN_TEST(test_roadbook_initial_state);
     RUN_TEST(test_roadbook_advances_waypoint);
     RUN_TEST(test_roadbook_skips_multiple_waypoints);
-    RUN_TEST(test_roadbook_loops_after_finish);
+    RUN_TEST(test_roadbook_finish_detection);
     RUN_TEST(test_roadbook_reset);
     RUN_TEST(test_roadbook_stage_data_consistency);
 
@@ -253,6 +472,21 @@ int main(int, char**) {
     RUN_TEST(test_sim_odometer_advances);
     RUN_TEST(test_sim_dt_clamp);
 
+    RUN_TEST(test_driver_brakes_into_danger_waypoint);
+    RUN_TEST(test_driver_accelerates_on_straight);
+    RUN_TEST(test_driver_holds_corner_speed_at_apex);
+    RUN_TEST(test_driver_corner_speed_mapping);
+
+    RUN_TEST(test_race_boot_then_live);
+    RUN_TEST(test_race_full_lap_finish_and_restart);
+    RUN_TEST(test_race_alert_near_danger_waypoint);
+    RUN_TEST(test_race_gear_snap_progress);
+
+    RUN_TEST(test_anim_progress);
+    RUN_TEST(test_anim_pulse);
+    RUN_TEST(test_anim_triangle_and_snap);
+    RUN_TEST(test_anim_lerp565);
+
     RUN_TEST(test_fmt_speed);
     RUN_TEST(test_fmt_battery);
     RUN_TEST(test_fmt_temp);
@@ -261,6 +495,7 @@ int main(int, char**) {
     RUN_TEST(test_fmt_gear);
     RUN_TEST(test_fmt_percent);
     RUN_TEST(test_fmt_clock);
+    RUN_TEST(test_fmt_race_time);
 
     return UNITY_END();
 }

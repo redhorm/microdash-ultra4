@@ -10,6 +10,30 @@ Due display SPI indipendenti pilotati in parallelo (DMA su due host SPI separati
 Un simulatore physics-based (C++ puro, testabile su host) genera velocità, RPM, marce,
 batteria, temperatura e un odometro che fa avanzare i waypoint del roadbook demo (9 WP, ~12 mi, in loop).
 
+## Demo loop & FX
+
+La state machine globale (`core/race.{h,cpp}`) orchestra: **BOOT → LIVE → FINISH → restart**,
+tutta a `millis()`, durate e soglie in `config.h` (sezione *Animation & FX*):
+
+- **Boot cinematico** (~4 s): dash → wordmark ULTRA4 in fade, sweep RPM 0→max→0,
+  self-check strumenti; navigator sfasato di 0.8 s → "GPS ACQUIRING" con anello
+  satelliti che si accende, flash "SAT LOCK", poi tabella live.
+- **Shift light**: oltre `REDLINE_RPM` bordo dash e zona rossa RPM lampeggiano
+  rosso/bianco; a ogni cambio marcia il numero fa uno snap 130%→100% (`GEAR_SNAP_MS`).
+- **Waypoint alert**: a `ALERT_DIST_MI` (0.2 mi) da un WP pericoloso la riga rossa
+  del roadbook pulsa, il countdown nel footer diventa rosso e sulla dash appare il
+  banner warning ("L HAIRPIN SLOW !!") — i due schermi si parlano.
+- **Demo driver** (`DEMO_MODE 1`, `core/driver.cpp`): guida roadbook-aware con
+  staccate calcolate sulla distanza di frenata, punte a ~70 mph sul dritto,
+  hairpin a 12 mph. `DEMO_MODE 0` = vecchio ciclo throttle/brake fisso.
+- **Finish**: navigator con scacchiera animata + tempo stage (mm:ss.d), dash con
+  max speed / max RPM della run. Hold `FINISH_HOLD_MS` (4 s), poi riparte il giro.
+  Loop infinito senza fermi immagine.
+
+Frame time reale (render e push separati, avg/max per display) loggato su seriale
+ogni `PROFILE_LOG_MS` (5 s). Durante gli FX critici della dash il navigator scala
+a `NAV_FRAME_SLOW_MS` per non rubare CPU. Frecce e dot del roadbook sono
+anti-aliased (`drawWideLine`/`fillSmoothCircle`).
 
 ## Pinout (ESP32-S3 DevKitC-1)
 
@@ -83,6 +107,9 @@ src/
     state.h             ← VehicleState condiviso tra i due display
     simulator.{h,cpp}   ← fisica: throttle/brake → velocità/RPM/marce/batteria/temp
     roadbook.{h,cpp}    ← stage demo 9 waypoint + avanzamento su odometro
+    driver.{h,cpp}      ← autopilot roadbook-aware (demo mode)
+    race.{h,cpp}        ← state machine BOOT/LIVE/FINISH, stats run, alert
+    anim.h              ← helper animazioni (pulse, ease, lerp565)
     formatter.{h,cpp}   ← formattazione valori in buffer (no heap)
   hal/
     display_a.h         ← LGFX device ST7735S su SPI2_HOST + DMA

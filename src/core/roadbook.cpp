@@ -26,11 +26,8 @@ void Roadbook::reset() {
 }
 
 void Roadbook::update(VehicleState& s) {
-    // Loop stage: reset when past finish
-    if (s.odo_mi >= _wp[_count - 1].total_mi) {
-        s.odo_mi = 0.0f;
-        _active  = 0;
-    }
+    // Note: the lap does NOT loop here — RaceController owns the
+    // finish detection (result screens) and calls reset() afterwards.
 
     // Advance active waypoint when odometer passes its total distance
     while (_active < _count - 1 && s.odo_mi >= _wp[_active + 1].total_mi)

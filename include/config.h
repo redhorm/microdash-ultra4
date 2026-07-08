@@ -69,3 +69,53 @@
 #define SIM_IDLE_RPM       800.0f
 #define SIM_NUM_GEARS        5
 
+// ----------------------------------------------------------------
+// Demo driver (autopilot roadbook-aware)
+// DEMO_MODE 1 = guida lo stage frenando prima dei waypoint;
+// DEMO_MODE 0 = vecchio ciclo throttle/brake fisso a 8 s
+// ----------------------------------------------------------------
+#define DEMO_MODE               1
+#define DRV_CRUISE_MPH        70.0f   // velocità sul dritto
+#define DRV_TGT_HAIRPIN_MPH   12.0f   // target ingresso curva per tipo WP
+#define DRV_TGT_90_MPH        20.0f
+#define DRV_TGT_WATER_MPH     15.0f
+#define DRV_TGT_45_MPH        45.0f
+#define DRV_BRAKE_DECEL       12.0f   // mph/s usati per pianificare la staccata
+#define DRV_BRAKE_MARGIN       1.4f   // frena con questo margine di sicurezza
+#define DRV_CORNER_HOLD_MI    0.03f   // tiene la velocità-curva così vicino al WP
+#define DRV_SPEED_DEADBAND     2.0f   // mph di tolleranza sul target
+#define DRV_BRAKE_GAIN_MPH    12.0f   // mph oltre target → freno pieno
+#define DRV_THROTTLE_GAIN_MPH 25.0f   // mph sotto target → gas pieno
+#define DRV_MAX_THROTTLE      0.95f
+
+// ----------------------------------------------------------------
+// Animation & FX (tutte le durate in ms)
+// ----------------------------------------------------------------
+// Boot sequence — dash: logo → sweep RPM → check; nav parte sfasato
+#define BOOT_LOGO_MS         900
+#define BOOT_SWEEP_MS       1300
+#define BOOT_CHECK_MS        800
+#define BOOT_NAV_DELAY_MS    800
+#define BOOT_NAV_ACQ_MS     2400
+#define BOOT_NAV_LOCK_MS     600
+#define BOOT_TOTAL_MS       3800   // ≥ fine di entrambe le timeline
+
+// Shift light / redline
+#define REDLINE_RPM        5700.0f
+#define SHIFT_FLASH_MS       110   // semiperiodo lampeggio bordo/barra
+#define GEAR_SNAP_MS         100   // durata snap del numero marcia
+#define GEAR_SNAP_SCALE      1.3f  // scala iniziale dello snap (130%)
+
+// Waypoint alert
+#define ALERT_DIST_MI        0.20f // distanza di attivazione dal WP danger
+#define ALERT_PULSE_MS       250   // semiperiodo pulsazione riga/footer
+
+// Finish line
+#define FINISH_HOLD_MS      4000   // hold schermata risultato
+#define SAT_LOCK_COUNT        12   // satelliti a lock avvenuto
+
+// ----------------------------------------------------------------
+// Frame pacing / profiling
+// ----------------------------------------------------------------
+#define NAV_FRAME_SLOW_MS    120   // navigator rallentato durante FX dash
+#define PROFILE_LOG_MS      5000   // report frame time su seriale

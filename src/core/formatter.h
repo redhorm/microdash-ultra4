@@ -39,4 +39,7 @@ void distNum(char* buf, float mi, bool use_km = false);
 // "12:34:56" from seconds since start, base clock 12:00:00 — buf ≥9
 void clockHMS(char* buf, uint32_t seconds);
 
+// "04:23.7" race time mm:ss.tenths from milliseconds — buf ≥9
+void raceTime(char* buf, uint32_t ms);
+
 } // namespace Fmt

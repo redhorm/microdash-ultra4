@@ -9,14 +9,24 @@ static float clampf(float v, float lo, float hi) {
 // Gear thresholds (mph): shift up above [gear], down below [gear]
 static const float UP_MPH[SIM_NUM_GEARS + 1]   = {0, 0, 18, 32, 52, 72};
 static const float DOWN_MPH[SIM_NUM_GEARS + 1] = {0, 0,  8, 22, 38, 56};
-// Effective wheel-RPM-to-engine-RPM multipliers per gear
-static const float GEAR_RATIO[SIM_NUM_GEARS + 1] = {0, 3.6f, 2.2f, 1.5f, 1.1f, 0.8f};
+// Effective wheel-RPM-to-engine-RPM multipliers per gear.
+// Tuned with RPM_PER_MPH so each up-shift point lands just past
+// REDLINE_RPM (shift-light drama) and drops to ~4000 after the shift.
+static const float GEAR_RATIO[SIM_NUM_GEARS + 1] = {0, 3.6f, 2.2f, 1.35f, 0.95f, 0.72f};
+static const float RPM_PER_MPH = 90.0f;
 
 void Simulator::reset() {
     state = VehicleState{};
     _elapsed_ms = 0;
+    _external   = false;
     _throttle   = 0.0f;
     _brake      = 0.0f;
+}
+
+void Simulator::setInputs(float throttle, float brake) {
+    _external = true;
+    _throttle = clampf(throttle, 0.0f, 1.0f);
+    _brake    = clampf(brake,    0.0f, 1.0f);
 }
 
 void Simulator::update(uint32_t dt_ms) {
@@ -26,7 +36,7 @@ void Simulator::update(uint32_t dt_ms) {
     _elapsed_ms += dt_ms;
     float dt_s = dt_ms * 0.001f;
 
-    _updateAutopilot();
+    if (!_external) _updateAutopilot();
     _updatePowertrain(dt_s);
     _updateThermal(dt_s);
     _updateNav(dt_s);
@@ -66,7 +76,7 @@ void Simulator::_updatePowertrain(float dt_s) {
         state.gear--;
 
     // RPM: blend engine speed from wheel speed + direct throttle blip
-    float wheel_rpm = state.speed_mph * GEAR_RATIO[state.gear] * 155.0f;
+    float wheel_rpm = state.speed_mph * GEAR_RATIO[state.gear] * RPM_PER_MPH;
     float blip      = _throttle * 900.0f;
     float target    = (_throttle > 0.05f) ? (wheel_rpm + blip)
                                            : SIM_IDLE_RPM;

@@ -78,4 +78,11 @@ void clockHMS(char* buf, uint32_t seconds) {
              (unsigned)h, (unsigned)m, (unsigned)s);
 }
 
+void raceTime(char* buf, uint32_t ms) {
+    uint32_t m = ms / 60000;
+    uint32_t s = (ms / 1000) % 60;
+    uint32_t t = (ms / 100) % 10;
+    snprintf(buf, 9, "%02u:%02u.%u", (unsigned)m, (unsigned)s, (unsigned)t);
+}
+
 } // namespace Fmt
