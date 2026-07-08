@@ -12,6 +12,9 @@
 #include "core/driver.h"
 #include "core/race.h"
 #include "core/anim.h"
+#include "core/easing.h"
+#include "core/noise.h"
+#include "core/compass.h"
 
 void setUp() {}
 void tearDown() {}
@@ -372,6 +375,209 @@ static void test_anim_lerp565() {
     TEST_ASSERT_TRUE(b >= 14 && b <= 16);
 }
 
+// ── Easing / Follow / SlideAnim ──────────────────────────────────────────────
+
+static void test_ease_curves() {
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, Ease::inOutQuad(0.0f));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, Ease::inOutQuad(0.5f));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, Ease::inOutQuad(1.0f));
+    // slow start: first quarter covers less than linear
+    TEST_ASSERT_TRUE(Ease::inOutQuad(0.25f) < 0.25f);
+    TEST_ASSERT_TRUE(Ease::inOutQuad(0.75f) > 0.75f);
+}
+
+static void test_follow_attack_release_asymmetry() {
+    Follow f;
+    f.update(0.0f, 0, 60.0f, 400.0f);      // primes at 0
+
+    // Rising with tau=60ms: after 100ms it should be most of the way up
+    float up = f.update(1.0f, 100, 60.0f, 400.0f);
+    TEST_ASSERT_TRUE(up > 0.7f);
+
+    // Falling with tau=400ms: after another 100ms it barely dropped
+    float dn = f.update(0.0f, 200, 60.0f, 400.0f);
+    TEST_ASSERT_TRUE(dn > up * 0.6f);
+    // and it always converges eventually
+    for (uint32_t t = 300; t <= 5000; t += 100)
+        dn = f.update(0.0f, t, 60.0f, 400.0f);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, dn);
+}
+
+static void test_follow_first_update_snaps() {
+    Follow f;
+    float v = f.update(42.0f, 12345, 100.0f, 100.0f);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 42.0f, v);   // no lerp from stale 0
+}
+
+static void test_slide_anim() {
+    SlideAnim s;
+    s.setTarget(0, 1000, 260);                // primes without animating
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, s.pos(1000));
+
+    s.setTarget(1, 2000, 260);                // 0 → 1 slide
+    TEST_ASSERT_TRUE(s.active(2100));
+    float mid = s.pos(2130);
+    TEST_ASSERT_TRUE(mid > 0.0f && mid < 1.0f);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, s.pos(2400));
+    TEST_ASSERT_FALSE(s.active(2400));
+
+    // retarget mid-flight must not jump backwards past current pos
+    s.setTarget(2, 3000, 260);
+    float p1 = s.pos(3100);
+    s.setTarget(3, 3100, 260);
+    float p2 = s.pos(3101);
+    TEST_ASSERT_FLOAT_WITHIN(0.05f, p1, p2);
+}
+
+// ── Noise (deterministic micro-life) ─────────────────────────────────────────
+
+static void test_noise_deterministic_and_bounded() {
+    for (uint32_t t = 0; t < 5000; t += 37) {
+        float a = Noise::smooth(t, 120, 0xC0FFEE);
+        float b = Noise::smooth(t, 120, 0xC0FFEE);
+        TEST_ASSERT_FLOAT_WITHIN(0.0001f, a, b);   // same seed → same value
+        TEST_ASSERT_TRUE(a >= -1.0f && a <= 1.0f);
+    }
+    // different seed → different sequence (at least somewhere)
+    bool differs = false;
+    for (uint32_t t = 0; t < 1000 && !differs; t += 13)
+        differs = Noise::smooth(t, 120, 1) != Noise::smooth(t, 120, 2);
+    TEST_ASSERT_TRUE(differs);
+}
+
+static void test_noise_vib_bounded() {
+    for (uint32_t t = 0; t < 3000; t += 7) {
+        int v = Noise::vibPx(t, 1.0f, 1, 45, 99);
+        TEST_ASSERT_TRUE(v >= -1 && v <= 1);
+    }
+    // zero rpm → zero shake
+    TEST_ASSERT_EQUAL_INT(0, Noise::vibPx(1234, 0.0f, 1, 45, 99));
+}
+
+static void test_sim_rpm_jitter_alive_but_bounded() {
+    Simulator sim;
+    sim.reset();
+    sim.setInputs(0.4f, 0.0f);           // steady cruise
+    for (int i = 0; i < 100; i++) sim.update(33);
+
+    // At steady state RPM must still move a little frame-to-frame
+    float prev = sim.state.rpm;
+    float max_delta = 0.0f;
+    for (int i = 0; i < 60; i++) {
+        sim.update(33);
+        float d = sim.state.rpm - prev;
+        if (d < 0) d = -d;
+        if (d > max_delta) max_delta = d;
+        prev = sim.state.rpm;
+    }
+    TEST_ASSERT_TRUE(max_delta > 1.0f);              // alive...
+    TEST_ASSERT_TRUE(max_delta < SIM_RPM_JITTER * 4); // ...but sane
+}
+
+static void test_sim_battery_sags_and_recovers() {
+    Simulator sim;
+    sim.reset();
+    sim.setInputs(0.2f, 0.0f);           // settle at light load
+    for (int i = 0; i < 30; i++) sim.update(33);
+    float before = sim.state.battery_v;
+
+    sim.setInputs(1.0f, 0.0f);           // hammer the throttle 2 s
+    for (int i = 0; i < 60; i++) sim.update(33);
+    float dipped = sim.state.battery_v;
+    TEST_ASSERT_TRUE(before - dipped > 0.15f);   // visible sag
+
+    sim.setInputs(0.0f, 0.0f);           // release 3 s → slow recovery
+    for (int i = 0; i < 90; i++) sim.update(33);
+    TEST_ASSERT_TRUE(sim.state.battery_v > dipped + 0.05f);
+}
+
+static void test_sim_thermal_inertia_asymmetric() {
+    Simulator sim;
+    sim.reset();
+    float cold = sim.state.engine_temp_f;
+
+    sim.setInputs(1.0f, 0.0f);           // 5 s full load
+    for (int i = 0; i < 150; i++) sim.update(33);
+    float hot  = sim.state.engine_temp_f;
+    float rise = hot - cold;
+
+    sim.setInputs(0.0f, 0.0f);           // 5 s coast
+    for (int i = 0; i < 150; i++) sim.update(33);
+    float fall = hot - sim.state.engine_temp_f;
+
+    TEST_ASSERT_TRUE(rise > 30.0f);      // heats up for real
+    TEST_ASSERT_TRUE(fall > 0.5f);       // does cool...
+    TEST_ASSERT_TRUE(rise > fall * 2.0f); // ...but much more slowly
+}
+
+// ── Compass tape (hero detail) ───────────────────────────────────────────────
+
+static void test_compass_north_centered() {
+    Compass::Tick t[12];
+    int n = Compass::tape(0.0f, 72, 0.8f, t, 12);
+    TEST_ASSERT_TRUE(n > 0);
+    bool found_n = false;
+    for (int i = 0; i < n; i++) {
+        TEST_ASSERT_TRUE(t[i].x >= 0 && t[i].x < 72);
+        if (t[i].major && strcmp(t[i].label, "N") == 0) {
+            found_n = true;
+            TEST_ASSERT_EQUAL_INT(36, t[i].x);   // dead center
+        }
+    }
+    TEST_ASSERT_TRUE(found_n);
+}
+
+static void test_compass_wraparound() {
+    // Heading 350°: N (360°) must appear right of center (+10°)
+    Compass::Tick t[12];
+    int n = Compass::tape(350.0f, 72, 0.8f, t, 12);
+    bool found_n = false;
+    for (int i = 0; i < n; i++) {
+        if (t[i].major && strcmp(t[i].label, "N") == 0) {
+            found_n = true;
+            TEST_ASSERT_EQUAL_INT(36 + 8, t[i].x);   // +10° × 0.8 px/deg
+        }
+    }
+    TEST_ASSERT_TRUE(found_n);
+}
+
+static void test_compass_tick_spacing() {
+    Compass::Tick t[12];
+    int n = Compass::tape(123.0f, 72, 0.8f, t, 12);
+    TEST_ASSERT_TRUE(n >= 4);            // 90° window / 15° = ~6 ticks
+    for (int i = 1; i < n; i++)          // 15° → 12 px apart
+        TEST_ASSERT_EQUAL_INT(12, t[i].x - t[i - 1].x);
+}
+
+// ── Alert banner in/out timing ───────────────────────────────────────────────
+
+static void test_race_alert_in_out_timing() {
+    Simulator sim;  sim.reset();
+    Roadbook rb;    rb.reset();
+    RaceController rc;
+    rc.reset(0);
+    uint32_t now = stepRace(rc, sim, rb, 0, BOOT_TOTAL_MS + 100);
+
+    // Enter alert range → age starts counting, gone resets to "never"
+    sim.state.odo_mi = 1.10f;
+    now += DASH_FRAME_MS; rc.update(now, sim, rb);
+    TEST_ASSERT_TRUE(rc.fx().alert);
+    uint32_t age0 = rc.fx().alert_age_ms;
+    now += DASH_FRAME_MS; rc.update(now, sim, rb);
+    TEST_ASSERT_TRUE(rc.fx().alert_age_ms > age0);
+    TEST_ASSERT_EQUAL_INT((int)0xFFFFFFFF, (int)rc.fx().alert_gone_ms);
+    const char* info = rc.fx().alert_info;
+
+    // Leave alert range → gone counts up, text is kept for the fade-out
+    sim.state.odo_mi = 1.50f;
+    now += DASH_FRAME_MS; rc.update(now, sim, rb);
+    TEST_ASSERT_FALSE(rc.fx().alert);
+    TEST_ASSERT_TRUE(rc.fx().alert_gone_ms <= DASH_FRAME_MS + 1);
+    TEST_ASSERT_EQUAL_STRING(info, rc.fx().alert_info);
+    now += DASH_FRAME_MS; rc.update(now, sim, rb);
+    TEST_ASSERT_TRUE(rc.fx().alert_gone_ms >= DASH_FRAME_MS);
+}
+
 // ── Formatter ────────────────────────────────────────────────────────────────
 
 static void test_fmt_speed() {
@@ -486,6 +692,23 @@ int main(int, char**) {
     RUN_TEST(test_anim_pulse);
     RUN_TEST(test_anim_triangle_and_snap);
     RUN_TEST(test_anim_lerp565);
+
+    RUN_TEST(test_ease_curves);
+    RUN_TEST(test_follow_attack_release_asymmetry);
+    RUN_TEST(test_follow_first_update_snaps);
+    RUN_TEST(test_slide_anim);
+
+    RUN_TEST(test_noise_deterministic_and_bounded);
+    RUN_TEST(test_noise_vib_bounded);
+    RUN_TEST(test_sim_rpm_jitter_alive_but_bounded);
+    RUN_TEST(test_sim_battery_sags_and_recovers);
+    RUN_TEST(test_sim_thermal_inertia_asymmetric);
+
+    RUN_TEST(test_compass_north_centered);
+    RUN_TEST(test_compass_wraparound);
+    RUN_TEST(test_compass_tick_spacing);
+
+    RUN_TEST(test_race_alert_in_out_timing);
 
     RUN_TEST(test_fmt_speed);
     RUN_TEST(test_fmt_battery);

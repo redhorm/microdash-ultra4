@@ -135,6 +135,7 @@ void loop() {
             Serial.printf(
                 "[prof] dash %2u FPS render %lu/%lu us push %lu/%lu us | "
                 "nav %2u FPS render %lu/%lu us push %lu/%lu us | "
+                "heap %u KB | "
                 "spd=%.0f rpm=%.0f gear=%d wp=%d odo=%.2f phase=%d\n",
                 (unsigned)fps,
                 (unsigned long)dashRender.avg(), (unsigned long)dashRender.max_us,
@@ -142,6 +143,7 @@ void loop() {
                 (unsigned)navFps,
                 (unsigned long)navRenderAvg, (unsigned long)navRenderMax,
                 (unsigned long)navPushAvg,   (unsigned long)navPushMax,
+                (unsigned)(esp_get_free_heap_size() / 1024),
                 sim.state.speed_mph, sim.state.rpm, sim.state.gear,
                 sim.state.active_wp, sim.state.odo_mi, (int)race.fx().phase);
         }

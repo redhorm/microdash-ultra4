@@ -28,8 +28,12 @@ struct UiFx {
     bool        alert       = false; // danger waypoint within ALERT_DIST_MI
     int         alert_wp    = -1;
     float       alert_dist  = 0.0f;  // miles to the danger waypoint
+    // alert_info/note stay valid after the alert ends so the banner
+    // can fade out with the last text still readable.
     const char* alert_info  = "";
     const char* alert_note  = "";
+    uint32_t    alert_age_ms  = 0;          // ms since alert became active
+    uint32_t    alert_gone_ms = 0xFFFFFFFF; // ms since it ended (max = never)
 };
 
 // Orchestrates simulator + roadbook + driver through the phase machine.
@@ -48,6 +52,10 @@ private:
     uint32_t _last_ms        = 0;
     int      _prev_gear      = 1;
     uint32_t _gear_change_ms = 0;   // 0 = no change seen yet
+    uint32_t _alert_on_ms    = 0;   // when the current alert started
+    uint32_t _alert_off_ms   = 0;   // when the last alert ended
+    bool     _alert_active   = false;
+    bool     _alert_ever_off = false;
     RunStats _stats;
     UiFx     _fx;
     Driver   _driver;

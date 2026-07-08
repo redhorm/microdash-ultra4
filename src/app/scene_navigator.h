@@ -5,6 +5,8 @@
 #include "core/state.h"
 #include "core/roadbook.h"
 #include "core/race.h"
+#include "core/easing.h"
+#include "ui_fonts.h"
 
 // Navigator renderer for Display B — ST7789  240×240
 // WAY MAP style: header / roadbook table + speed column / footer
@@ -19,6 +21,12 @@ private:
     LGFX_Sprite        _spr;
     lgfx::LGFX_Device& _disp;
     const Roadbook&    _rb;
+    UiFonts            _fonts;
+
+    // Display-value smoothing / scroll animation (core logic)
+    SlideAnim _scroll;   // roadbook slides between waypoints, never snaps
+    Follow    _distF;    // footer countdown, interpolated at 12 FPS
+    Follow    _spdF;     // side-column speed
 
     // Phase screens
     void _renderBoot(const UiFx& fx);
@@ -29,7 +37,7 @@ private:
     void _drawHeader(const UiFx& fx);
     void _drawTable(const VehicleState& s, const UiFx& fx);
     void _drawRow(int y, const Waypoint& wp, bool active, bool alert_on);
-    void _drawSideColumn(const VehicleState& s);
+    void _drawSideColumn(const VehicleState& s, const UiFx& fx);
     void _drawFooter(const VehicleState& s, const UiFx& fx);
     void _drawArrow(int cx, int cy, const Waypoint& wp);
     void _checkerBand(int y, int h, uint32_t ms);

@@ -115,6 +115,38 @@
 #define SAT_LOCK_COUNT        12   // satelliti a lock avvenuto
 
 // ----------------------------------------------------------------
+// Wow pass — smoothing, micro-vita, transizioni, compass tape
+// ----------------------------------------------------------------
+// Easing dei valori visualizzati (tau in ms; attack/release separati)
+#define SPEED_SMOOTH_MS      120.0f  // inseguimento velocità dash
+#define RPM_ATTACK_MS         60.0f  // barra RPM: salita scattante...
+#define RPM_RELEASE_MS       400.0f  // ...discesa lenta (VU meter)
+#define NAV_VALUE_SMOOTH_MS  150.0f  // valori navigator (12 FPS)
+#define SCROLL_MS            260     // slide scroll roadbook
+
+// Micro-vita (rumore deterministico, seedabile)
+#define SIM_NOISE_SEED    0xC0FFEEu
+#define SIM_RPM_JITTER        40.0f  // ±rpm a regime
+#define SIM_RPM_JITTER_MS    120     // periodo del noise RPM
+#define SIM_BAT_SAG_V          0.30f // flessione tensione a pieno carico
+#define SIM_BAT_SAG_UP_MS    400.0f  // tau insorgenza sag
+#define SIM_BAT_SAG_DN_MS   4000.0f  // tau recupero (lento)
+#define SIM_TEMP_HEAT_RATE     0.45f // 1/s: scalda in fretta...
+#define SIM_TEMP_COOL_RATE     0.05f // ...raffredda piano
+#define VIB_MAX_PX             1     // tremolio barre (solo LIVE)
+#define VIB_PERIOD_MS         45
+
+// Transizioni di stato
+#define LIVE_WIPE_MS         450     // wipe BOOT→LIVE
+#define NAV_WIPE_LAG_MS      120     // il navigator segue la dash
+#define FINISH_SHUTDOWN_MS   700     // spegnimento sequenziale strumenti
+#define ALERT_IN_MS          180     // slide-in banner alert
+#define ALERT_OUT_MS         250     // fade-out banner alert
+
+// Compass tape (hero detail)
+#define TAPE_PX_PER_DEG        0.8f  // scala nastro: 72 px ≈ ±45° visibili
+
+// ----------------------------------------------------------------
 // Frame pacing / profiling
 // ----------------------------------------------------------------
 #define NAV_FRAME_SLOW_MS    120   // navigator rallentato durante FX dash

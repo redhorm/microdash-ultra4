@@ -30,10 +30,32 @@ tutta a `millis()`, durate e soglie in `config.h` (sezione *Animation & FX*):
   max speed / max RPM della run. Hold `FINISH_HOLD_MS` (4 s), poi riparte il giro.
   Loop infinito senza fermi immagine.
 
-Frame time reale (render e push separati, avg/max per display) loggato su seriale
-ogni `PROFILE_LOG_MS` (5 s). Durante gli FX critici della dash il navigator scala
-a `NAV_FRAME_SLOW_MS` per non rubare CPU. Frecce e dot del roadbook sono
-anti-aliased (`drawWideLine`/`fillSmoothCircle`).
+Frame time reale (render e push separati, avg/max per display) e heap libero
+loggati su seriale ogni `PROFILE_LOG_MS` (5 s). Durante gli FX critici della dash
+il navigator scala a `NAV_FRAME_SLOW_MS` per non rubare CPU. Frecce e dot del
+roadbook sono anti-aliased (`drawWideLine`/`fillSmoothCircle`).
+
+## Wow pass
+
+- **Font smooth VLW** — Barlow Condensed Bold (OFL) subsettato in 3 taglie
+  (44/20/12 px, ~32 KB flash totali) embedded come header C e renderizzato
+  anti-aliased. Rigenerazione: `python3 tools/make_vlw.py` (richiede Pillow).
+  Ogni scena ha la propria istanza `UiFonts`: il cursore del DataWrapper VLW è
+  stato mutabile, condividerlo tra i due task (core diversi) sarebbe una race.
+- **Easing ovunque** (`core/easing.h`): velocità con inseguimento smooth, barra
+  RPM stile VU meter (attack `RPM_ATTACK_MS`, release `RPM_RELEASE_MS`), scroll
+  del roadbook a slide (`SCROLL_MS`, clip sul corpo tabella), countdown footer
+  interpolato per il refresh a 12 FPS.
+- **Micro-vita** (`core/noise.h`, deterministico e seedabile): jitter RPM ±40 a
+  regime, sag batteria transiente sotto pieno carico con recupero lento, inerzia
+  termica asimmetrica (scalda in fretta, raffredda piano), micro-tremolio ±1 px
+  delle barre con ampiezza ∝ RPM (solo LIVE).
+- **Transizioni**: wipe orizzontale BOOT→LIVE coordinato tra i display (il nav
+  segue di `NAV_WIPE_LAG_MS`), spegnimento sequenziale strumenti LIVE→FINISH,
+  banner alert con slide-in ease-out e fade-out (mai un cut secco).
+- **Hero detail**: nastro bussola tape-style aeronautico in cima alla dash
+  (`core/compass.h`), tick ogni 15°, cardinali ogni 45°, marker centrale lime —
+  in moto perpetuo con l'heading simulato.
 
 ## Pinout (ESP32-S3 DevKitC-1)
 
@@ -110,6 +132,9 @@ src/
     driver.{h,cpp}      ← autopilot roadbook-aware (demo mode)
     race.{h,cpp}        ← state machine BOOT/LIVE/FINISH, stats run, alert
     anim.h              ← helper animazioni (pulse, ease, lerp565)
+    easing.h            ← curve easing, Follow (attack/release), SlideAnim
+    noise.h             ← value noise deterministico (jitter, vibrazione)
+    compass.h           ← geometria nastro bussola tape-style
     formatter.{h,cpp}   ← formattazione valori in buffer (no heap)
   hal/
     display_a.h         ← LGFX device ST7735S su SPI2_HOST + DMA

@@ -1,4 +1,5 @@
 #include "simulator.h"
+#include "noise.h"
 #include "config.h"
 #include <math.h>
 
@@ -19,6 +20,9 @@ void Simulator::reset() {
     state = VehicleState{};
     _elapsed_ms = 0;
     _external   = false;
+    _bat_base   = state.battery_v;
+    _bat_sag_v  = 0.0f;
+    _rpm_jit    = 0.0f;
     _throttle   = 0.0f;
     _brake      = 0.0f;
 }
@@ -80,27 +84,45 @@ void Simulator::_updatePowertrain(float dt_s) {
     float blip      = _throttle * 900.0f;
     float target    = (_throttle > 0.05f) ? (wheel_rpm + blip)
                                            : SIM_IDLE_RPM;
-    // Low-pass filter for smooth RPM
+    // Low-pass filter for smooth RPM, then deterministic jitter on top.
+    // Last frame's jitter is stripped first so noise never accumulates
+    // through the filter.
+    state.rpm -= _rpm_jit;
     float alpha = 1.0f - expf(-dt_s * 4.0f);
     state.rpm += (target - state.rpm) * alpha;
-    state.rpm = clampf(state.rpm, SIM_IDLE_RPM * 0.9f, SIM_MAX_RPM);
+    _rpm_jit = Noise::smooth(_elapsed_ms, SIM_RPM_JITTER_MS, SIM_NOISE_SEED)
+             * SIM_RPM_JITTER * (0.4f + 0.6f * state.rpm / SIM_MAX_RPM);
+    state.rpm = clampf(state.rpm + _rpm_jit, SIM_IDLE_RPM * 0.9f, SIM_MAX_RPM);
 
     // Fuel drain
     state.fuel_pct -= _throttle * 2e-6f * (dt_s * 1000.0f);
     state.fuel_pct  = clampf(state.fuel_pct, 0.0f, 1.0f);
 
-    // Battery: drain under load, slow recharge at light throttle
+    // Battery: slow-moving base (drain under load, light recharge) plus a
+    // transient sag that flexes fast under heavy throttle and recovers slowly.
     float load = _throttle * 0.4f + 0.08f;
-    state.battery_v -= load * 1e-4f * (dt_s * 1000.0f);
-    if (_throttle > 0.15f && _throttle < 0.75f && state.battery_v < 14.0f)
-        state.battery_v += 4e-5f * (dt_s * 1000.0f);
-    state.battery_v = clampf(state.battery_v, 11.0f, 14.6f);
+    _bat_base -= load * 1e-4f * (dt_s * 1000.0f);
+    if (_throttle > 0.15f && _throttle < 0.75f && _bat_base < 14.0f)
+        _bat_base += 4e-5f * (dt_s * 1000.0f);
+    _bat_base = clampf(_bat_base, 11.0f, 14.6f);
+
+    float sag_target = SIM_BAT_SAG_V
+                     * clampf((_throttle - 0.5f) * 2.0f, 0.0f, 1.0f);
+    float sag_tau = (sag_target > _bat_sag_v) ? SIM_BAT_SAG_UP_MS
+                                              : SIM_BAT_SAG_DN_MS;
+    _bat_sag_v += (sag_target - _bat_sag_v)
+                * (1.0f - expf(-(dt_s * 1000.0f) / sag_tau));
+
+    state.battery_v = clampf(_bat_base - _bat_sag_v, 11.0f, 14.6f);
 }
 
 // ── Thermal ──────────────────────────────────────────────────────────────────
+// Real thermal inertia: heats up quickly under load, cools down slowly.
 void Simulator::_updateThermal(float dt_s) {
     float target = 155.0f + _throttle * 105.0f + _brake * 18.0f;
-    float alpha  = 1.0f - expf(-dt_s * 0.3f);
+    float rate   = (target > state.engine_temp_f) ? SIM_TEMP_HEAT_RATE
+                                                  : SIM_TEMP_COOL_RATE;
+    float alpha  = 1.0f - expf(-dt_s * rate);
     state.engine_temp_f += (target - state.engine_temp_f) * alpha;
     state.engine_temp_f  = clampf(state.engine_temp_f, 140.0f, 265.0f);
 }

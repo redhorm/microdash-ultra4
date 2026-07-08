@@ -20,6 +20,9 @@ public:
 private:
     uint32_t _elapsed_ms = 0;
     bool     _external   = false;
+    float    _bat_base   = 14.4f;  // slow-moving battery voltage
+    float    _bat_sag_v  = 0.0f;   // transient voltage sag under load
+    float    _rpm_jit    = 0.0f;   // last applied RPM jitter (stripped each step)
 
     void _updateAutopilot();
     void _updatePowertrain(float dt_s);

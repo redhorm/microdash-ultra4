@@ -55,6 +55,7 @@ void SceneNavigator::init() {
     _spr.setColorDepth(16);
     _spr.setPsram(false);          // internal RAM → DMA-friendly (112.5 KB)
     _spr.createSprite(W, H);
+    _fonts.init();
 }
 
 void SceneNavigator::push() {
@@ -215,8 +216,6 @@ void SceneNavigator::_drawRow(int y, const Waypoint& wp, bool active,
                               bool alert_on) {
     const int h = ROW_H - 1;
 
-    // Row background + DIST cell highlight; the alerted danger row
-    // strobes red⇄white (alert_on = bright half of the pulse)
     _spr.fillRect(0, y, TBL_W, h, C_ROW);
     uint16_t dist_bg, dist_ink;
     if (active)              { dist_bg = C_YELLOW; dist_ink = C_BLACK; }
@@ -233,13 +232,13 @@ void SceneNavigator::_drawRow(int y, const Waypoint& wp, bool active,
 
     const int cy = y + h / 2;
 
-    // DIST — segment distance, big
+    // DIST — segment distance, big smooth digits
     char buf[10];
     Fmt::distNum(buf, wp.dist_mi, USE_KMH);
-    _spr.setFont(&lgfx::fonts::Font2);
+    _spr.setFont(&_fonts.med);
     _spr.setTextSize(1);
     _spr.setTextDatum(lgfx::MC_DATUM);
-    _spr.setTextColor(dist_ink, dist_bg);
+    _spr.setTextColor(dist_ink);
     _spr.drawString(buf, CX_DIST, cy);
 
     _drawArrow(CX_ARR, y + 19, wp);
@@ -251,13 +250,12 @@ void SceneNavigator::_drawRow(int y, const Waypoint& wp, bool active,
                       :                                  C_BLACK;
     bool has_note   = wp.note && wp.note[0];
     bool short_info = strlen(wp.info) <= 7;
-    _spr.setFont(short_info ? (const lgfx::IFont*)&lgfx::fonts::Font2
-                            : (const lgfx::IFont*)&lgfx::fonts::Font0);
-    _spr.setTextColor(C_BLACK, C_ROW);
+    _spr.setFont(short_info ? &_fonts.med : &_fonts.small);
+    _spr.setTextColor(C_BLACK);
     _spr.drawString(wp.info, CX_INFO, has_note ? y + 13 : cy);
     if (has_note) {
-        _spr.setFont(&lgfx::fonts::Font0);
-        _spr.setTextColor(note_col, C_ROW);
+        _spr.setFont(&_fonts.small);
+        _spr.setTextColor(note_col);
         _spr.drawString(wp.note, CX_INFO, y + 29);
     }
 
@@ -283,25 +281,35 @@ void SceneNavigator::_drawTable(const VehicleState& s, const UiFx& fx) {
     _spr.drawString("TOT",  CX_TOT,  THDR_Y + 3);
     _spr.setTextDatum(lgfx::TL_DATUM);
 
-    // Scrolling window: keep active row second from top when possible
+    // Scrolling window: active row second from top; changes SLIDE
+    // (SlideAnim in core) instead of snapping.
     int first = s.active_wp - 1;
     int max_first = _rb.getCount() - N_ROWS;
     if (first > max_first) first = max_first;
     if (first < 0) first = 0;
+    _scroll.setTarget(first, fx.now_ms, SCROLL_MS);
+    float pos = _scroll.pos(fx.now_ms);
 
     bool pulse_on = Anim::pulse(fx.now_ms, ALERT_PULSE_MS);
-    for (int i = 0; i < N_ROWS && (first + i) < _rb.getCount(); i++) {
-        int idx = first + i;
-        bool alert_on = fx.alert && idx == fx.alert_wp && pulse_on;
-        _drawRow(BODY_Y + i * ROW_H, _rb.get(idx),
-                 idx == s.active_wp, alert_on);
+    _spr.setClipRect(0, BODY_Y, TBL_W, N_ROWS * ROW_H);
+    int i0 = (int)floorf(pos);
+    for (int i = i0; i <= i0 + N_ROWS && i < _rb.getCount(); i++) {
+        if (i < 0) continue;
+        int y = BODY_Y + (int)((i - pos) * ROW_H + 0.5f);
+        if (y >= BODY_Y + N_ROWS * ROW_H) break;
+        bool alert_on = fx.alert && i == fx.alert_wp && pulse_on;
+        _drawRow(y, _rb.get(i), i == s.active_wp, alert_on);
     }
+    _spr.clearClipRect();
 }
 
 // ── Right column: SPEED / GEAR / RPM / 4WD ──────────────────────────────────
 
-void SceneNavigator::_drawSideColumn(const VehicleState& s) {
+void SceneNavigator::_drawSideColumn(const VehicleState& s, const UiFx& fx) {
     _spr.fillRect(SIDE_X, HDR_H + 1, 2, FOOT_Y - HDR_H - 1, C_GRAY);
+
+    float spd = _spdF.update(s.speed_mph, fx.now_ms,
+                             NAV_VALUE_SMOOTH_MS, NAV_VALUE_SMOOTH_MS);
 
     char buf[10];
     _spr.setTextDatum(lgfx::TC_DATUM);
@@ -310,25 +318,21 @@ void SceneNavigator::_drawSideColumn(const VehicleState& s) {
     _spr.setTextSize(1);
     _spr.setTextColor(C_LGRAY, C_BG);
     _spr.drawString("SPEED", SIDE_CX, 27);
-    Fmt::speed(buf, s.speed_mph, USE_KMH);
-    _spr.setFont(&lgfx::fonts::Font4);
-    _spr.setTextSize(1.5f);
-    _spr.setTextColor(C_WHITE, C_BG);
-    _spr.drawString(buf, SIDE_CX, 37);
-    _spr.setTextSize(1);
+    Fmt::speed(buf, spd, USE_KMH);
+    _spr.setFont(&_fonts.speed);
+    _spr.setTextColor(C_WHITE);
+    _spr.drawString(buf, SIDE_CX, 34);
     _spr.setFont(&lgfx::fonts::Font0);
     _spr.setTextColor(C_LGRAY, C_BG);
-    _spr.drawString(USE_KMH ? "km/h" : "MPH", SIDE_CX, 79);
+    _spr.drawString(USE_KMH ? "km/h" : "MPH", SIDE_CX, 82);
 
     _spr.drawFastHLine(SIDE_X + 4, 92, W - SIDE_X - 8, C_GRAY);
 
     _spr.drawString("GEAR", SIDE_CX, 96);
     Fmt::gear(buf, s.gear, false);   // navigator shows the actual gear number
-    _spr.setFont(&lgfx::fonts::Font4);
-    _spr.setTextSize(1.5f);
-    _spr.setTextColor(C_YELLOW, C_BG);
-    _spr.drawString(buf, SIDE_CX, 106);
-    _spr.setTextSize(1);
+    _spr.setFont(&_fonts.speed);
+    _spr.setTextColor(C_YELLOW);
+    _spr.drawString(buf, SIDE_CX, 100);
 
     _spr.drawFastHLine(SIDE_X + 4, 152, W - SIDE_X - 8, C_GRAY);
 
@@ -336,8 +340,8 @@ void SceneNavigator::_drawSideColumn(const VehicleState& s) {
     _spr.setTextColor(C_LGRAY, C_BG);
     _spr.drawString("RPM", SIDE_CX, 156);
     Fmt::rpm(buf, s.rpm);
-    _spr.setFont(&lgfx::fonts::Font2);
-    _spr.setTextColor(C_WHITE, C_BG);
+    _spr.setFont(&_fonts.med);
+    _spr.setTextColor(C_WHITE);
     _spr.drawString(buf, SIDE_CX, 166);
 
     _spr.setFont(&lgfx::fonts::Font0);
@@ -356,25 +360,27 @@ void SceneNavigator::_drawFooter(const VehicleState& s, const UiFx& fx) {
 
     char buf[14];
     Fmt::headingFull(buf, s.heading_deg);
-    _spr.setFont(&lgfx::fonts::Font4);
+    _spr.setFont(&_fonts.med);
     _spr.setTextSize(1);
-    _spr.setTextColor(C_WHITE, C_BG);
+    _spr.setTextColor(C_WHITE);
     _spr.setTextDatum(lgfx::TL_DATUM);
-    _spr.drawString(buf, 4, 211);
+    _spr.drawString(buf, 4, 214);
 
-    // Countdown: alert distance strobes red/white, normal dist is yellow
-    char d[10];
+    // Countdown, smoothed so the 12 FPS refresh never steps visibly;
+    // alert distance strobes red/white, normal distance is yellow.
+    float target = fx.alert ? fx.alert_dist : s.dist_to_next;
+    float dist = _distF.update(target, fx.now_ms,
+                               NAV_VALUE_SMOOTH_MS, NAV_VALUE_SMOOTH_MS);
     uint16_t col = C_YELLOW;
-    float dist = s.dist_to_next;
-    if (fx.alert) {
-        dist = fx.alert_dist;
-        col  = Anim::pulse(fx.now_ms, ALERT_PULSE_MS) ? C_RED : C_WHITE;
-    }
+    if (fx.alert)
+        col = Anim::pulse(fx.now_ms, ALERT_PULSE_MS) ? C_RED : C_WHITE;
+
+    char d[10];
     Fmt::distNum(d, dist, USE_KMH);
     snprintf(buf, sizeof(buf), "%s %s", d, USE_KMH ? "KM" : "MI");
-    _spr.setTextColor(col, C_BG);
+    _spr.setTextColor(col);
     _spr.setTextDatum(lgfx::TR_DATUM);
-    _spr.drawString(buf, W - 4, 211);
+    _spr.drawString(buf, W - 4, 214);
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
 
@@ -400,41 +406,44 @@ void SceneNavigator::_renderBoot(const UiFx& fx) {
         char msg[20];
         int dots = (int)((t / 350) % 4);
         snprintf(msg, sizeof(msg), "GPS ACQUIRING%.*s", dots, "...");
-        _spr.setFont(&lgfx::fonts::Font2);
+        _spr.setFont(&_fonts.med);
         _spr.setTextSize(1);
-        _spr.setTextColor(C_WHITE, C_BG);
+        _spr.setTextColor(C_WHITE);
         _spr.setTextDatum(lgfx::TC_DATUM);
-        _spr.drawString(msg, W / 2, 40);
+        _spr.drawString(msg, W / 2, 36);
 
         const float d2r = 0.017453f;
         for (int i = 0; i < SAT_LOCK_COUNT; i++) {
             float a  = (90.0f - i * (360.0f / SAT_LOCK_COUNT)) * d2r;
-            int   sx = W / 2 + (int)(52.0f * cosf(a));
-            int   sy = 140  - (int)(52.0f * sinf(a));
+            int   sx = W / 2 + (int)(56.0f * cosf(a));
+            int   sy = 142  - (int)(56.0f * sinf(a));
             if (i < sats) _spr.fillSmoothCircle(sx, sy, 4, C_GREENB);
             else          _spr.drawCircle(sx, sy, 3, C_GRAY);
         }
 
         char cnt[10];
-        snprintf(cnt, sizeof(cnt), "SAT %d", sats);
-        _spr.setFont(&lgfx::fonts::Font4);
+        snprintf(cnt, sizeof(cnt), "%d", sats);
+        _spr.setFont(&_fonts.speed);
         _spr.setTextDatum(lgfx::MC_DATUM);
-        _spr.setTextColor(C_WHITE, C_BG);
-        _spr.drawString(cnt, W / 2, 140);
+        _spr.setTextColor(C_WHITE);
+        _spr.drawString(cnt, W / 2, 142);
+        _spr.setFont(&lgfx::fonts::Font0);
+        _spr.setTextColor(C_LGRAY, C_BG);
+        _spr.setTextDatum(lgfx::TC_DATUM);
+        _spr.drawString("SATELLITES", W / 2, 176);
         _spr.setTextDatum(lgfx::TL_DATUM);
 
     } else {
         if (Anim::pulse(t - acq_end, 150))
             _spr.fillScreen(C_DKGRN);
-        _spr.setFont(&lgfx::fonts::Font4);
-        _spr.setTextSize(1.5f);
+        _spr.setFont(&_fonts.speed);
+        _spr.setTextSize(1);
         _spr.setTextColor(C_WHITE);
         _spr.setTextDatum(lgfx::MC_DATUM);
         _spr.drawString("SAT LOCK", W / 2, 104);
-        _spr.setTextSize(1);
-        _spr.setFont(&lgfx::fonts::Font2);
+        _spr.setFont(&_fonts.med);
         _spr.setTextColor(C_GREENB);
-        _spr.drawString("WAY MAP READY", W / 2, 140);
+        _spr.drawString("WAY MAP READY", W / 2, 146);
         _spr.setTextDatum(lgfx::TL_DATUM);
     }
 }
@@ -442,46 +451,51 @@ void SceneNavigator::_renderBoot(const UiFx& fx) {
 void SceneNavigator::_renderLive(const VehicleState& s, const UiFx& fx) {
     _drawHeader(fx);
     _drawTable(s, fx);
-    _drawSideColumn(s);
+    _drawSideColumn(s, fx);
     _drawFooter(s, fx);
+
+    // BOOT→LIVE reveal: same wipe as the dash, lagging NAV_WIPE_LAG_MS
+    if (fx.phase_ms < LIVE_WIPE_MS + NAV_WIPE_LAG_MS) {
+        int x = (int)(W * Ease::inOutQuad(
+                    Anim::progress(fx.phase_ms, NAV_WIPE_LAG_MS, LIVE_WIPE_MS)));
+        if (x < W) _spr.fillRect(x, 0, W - x, H, C_BG);
+    }
 }
 
 void SceneNavigator::_renderFinish(const UiFx& fx, const RunStats& stats) {
     _checkerBand(0,      12, fx.now_ms);
     _checkerBand(H - 24, 12, fx.now_ms);
 
-    _spr.setFont(&lgfx::fonts::Font4);
-    _spr.setTextSize(2);
-    _spr.setTextColor(C_WHITE, C_BG);
+    _spr.setFont(&_fonts.speed);
+    _spr.setTextSize(1);
+    _spr.setTextColor(C_WHITE);
     _spr.setTextDatum(lgfx::MC_DATUM);
     _spr.drawString("FINISH", W / 2, 70);
-    _spr.setTextSize(1);
 
     _spr.setFont(&lgfx::fonts::Font0);
     _spr.setTextColor(C_LGRAY, C_BG);
     _spr.setTextDatum(lgfx::TC_DATUM);
-    _spr.drawString("STAGE TIME", W / 2, 102);
+    _spr.drawString("STAGE TIME", W / 2, 100);
 
     char buf[16];
     Fmt::raceTime(buf, stats.stage_ms);
-    _spr.setFont(&lgfx::fonts::Font4);
-    _spr.setTextSize(1.5f);
-    _spr.setTextColor(C_YELLOW, C_BG);
-    _spr.drawString(buf, W / 2, 114);
-    _spr.setTextSize(1);
+    _spr.setFont(&_fonts.speed);
+    _spr.setTextColor(C_YELLOW);
+    _spr.drawString(buf, W / 2, 112);
 
     char spd[10];
     Fmt::speed(spd, stats.max_speed_mph, USE_KMH);
     snprintf(buf, sizeof(buf), "MAX %s %s", spd, USE_KMH ? "KM/H" : "MPH");
-    _spr.setFont(&lgfx::fonts::Font2);
-    _spr.setTextColor(C_WHITE, C_BG);
+    _spr.setFont(&_fonts.med);
+    _spr.setTextColor(C_WHITE);
     _spr.drawString(buf, W / 2, 168);
 
     Fmt::distNum(spd, _rb.stageTotal(), USE_KMH);
     snprintf(buf, sizeof(buf), "%s %s - %d WP", spd,
              USE_KMH ? "KM" : "MI", _rb.getCount());
-    _spr.setTextColor(C_LGRAY, C_BG);
-    _spr.drawString(buf, W / 2, 190);
+    _spr.setFont(&_fonts.small);
+    _spr.setTextColor(C_LGRAY);
+    _spr.drawString(buf, W / 2, 192);
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
 
