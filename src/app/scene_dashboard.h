@@ -35,7 +35,9 @@ private:
     void _drawFrame();
     void _drawRPMBar(float rpm, bool flash_on);
     void _drawSwoosh();
-    void _drawHeroRow(float speed_mph, float rpm);
+    void _drawFramedValue(int x, int y, int w, int h,
+                          const char* value, const lgfx::IFont* val_font,
+                          uint16_t val_color, const char* unit);
     void _drawGearBox(int g, bool drive_auto, const UiFx& fx);
     void _drawMetricBox(int x, int y, int w, int h,
                         const char* value, const char* label,
