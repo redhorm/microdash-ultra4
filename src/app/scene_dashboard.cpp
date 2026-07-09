@@ -146,16 +146,16 @@ void SceneDashboard::_drawFramedValue(int x, int y, int w, int h,
     _spr.setFont(&lgfx::fonts::Font0);
     int uw = unit[0] ? _spr.textWidth(unit) + 3 : 0;
     int x0 = x + (w - vw - uw) / 2;
-    int bl = y + h - 3;
+    int ym = y + h / 2;                 // vertical center, like _drawMetricBox
 
-    _spr.setTextDatum(lgfx::BL_DATUM);
+    _spr.setTextDatum(lgfx::ML_DATUM);
     _spr.setFont(val_font);
     _spr.setTextColor(val_color);
-    _spr.drawString(value, x0, bl);
+    _spr.drawString(value, x0, ym);
     if (unit[0]) {
         _spr.setFont(&lgfx::fonts::Font0);
         _spr.setTextColor(Col::INK_MID);
-        _spr.drawString(unit, x0 + vw + 3, bl - 2);
+        _spr.drawString(unit, x0 + vw + 3, ym);
     }
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
@@ -309,7 +309,7 @@ void SceneDashboard::_renderBoot(const VehicleState& s, const UiFx& fx) {
         _drawSwoosh();
         _drawFramedValue(Lay::RPMBOX_X, Lay::RPMBOX_Y, Lay::RPMBOX_W,
                          Lay::RPMBOX_H, "8888", &lgfx::fonts::Font4,
-                         Col::ACCENT, "RPM");
+                         Col::INK, "RPM");
         _drawGearBox(8, false, fx);
         _drawCenteredText("SELF CHECK", 0, Lay::BOT_Y, Lay::W, Lay::BOT_H,
                           &lgfx::fonts::Font0, Col::INK);
@@ -339,7 +339,7 @@ void SceneDashboard::_renderLive(const VehicleState& s, const UiFx& fx,
     char rv[8];
     snprintf(rv, sizeof(rv), "%d", (int)s.rpm);   // raw: jitter keeps it alive
     _drawFramedValue(Lay::RPMBOX_X, Lay::RPMBOX_Y, Lay::RPMBOX_W, Lay::RPMBOX_H,
-                     rv, &lgfx::fonts::Font4, Col::ACCENT, "RPM");
+                     rv, &lgfx::fonts::Font4, Col::INK, "RPM");
     _drawGearBox(s.gear, s.drive_auto, fx);
     _drawRows(s, stats);
 
@@ -378,7 +378,7 @@ void SceneDashboard::_renderFinish(const VehicleState& s, const UiFx& fx,
             snprintf(rv, sizeof(rv), "%d", (int)s.rpm);
             _drawFramedValue(Lay::RPMBOX_X, Lay::RPMBOX_Y, Lay::RPMBOX_W,
                              Lay::RPMBOX_H, rv, &lgfx::fonts::Font4,
-                             Col::ACCENT, "RPM");
+                             Col::INK, "RPM");
         }
         return;
     }
