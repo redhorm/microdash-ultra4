@@ -7,9 +7,9 @@
 #include "core/easing.h"
 
 // Dashboard renderer for Display A — ST7735  160×80 landscape
-// RC racing style (light blue): gear bar 1-7 on top, racing swoosh,
-// dominant centered RPM, red gear box, GEAR/LAP row, MOTOR/ESC/VOLT row.
-// Built-in bitmap fonts only (VLW renders corrupted on this panel).
+// RC racing style (light blue): wedge RPM bar, framed RPM/MPH readouts,
+// red gear box, LAP row, MOTOR/ESC/VOLT row.
+// Built-in bitmap fonts: crisp and plenty at 0.96"; the nav uses VLW.
 class SceneDashboard {
 public:
     explicit SceneDashboard(lgfx::LGFX_Device& disp);

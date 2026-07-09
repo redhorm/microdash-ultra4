@@ -51,6 +51,10 @@ def render_glyph(font, ch, ascent):
 def build_vlw(ttf, size, charset):
     font = ImageFont.truetype(str(ttf), size)
     ascent, descent = font.getmetrics()
+    # LovyanGFX looks glyphs up with std::lower_bound (binary search):
+    # the table MUST be sorted by codepoint or every lookup fails and
+    # each char renders as the hollow missing-glyph box.
+    charset = sorted(set(charset), key=ord)
     glyphs = [(ord(c),) + render_glyph(font, c, ascent) for c in charset]
 
     out = bytearray()
