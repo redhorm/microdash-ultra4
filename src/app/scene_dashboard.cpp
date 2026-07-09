@@ -14,10 +14,10 @@ constexpr uint16_t BOX_HI   = 0xD73F;  // gear-box interior (lighter)
 constexpr uint16_t INK      = 0x11D0;  // dark navy: values, borders
 constexpr uint16_t INK_MID  = 0x2AF5;  // medium blue: labels, box borders
 constexpr uint16_t ACCENT   = 0xD904;  // red/orange: big gear letter
-constexpr uint16_t GEAR_ON  = 0xFD20;  // active gear highlight (orange)
-constexpr uint16_t SEG_LOW  = 0x5E46;  // gear segments 1-3 (green)
-constexpr uint16_t SEG_MID  = 0xF5A3;  // gear segments 4-5 (yellow/orange)
-constexpr uint16_t SEG_HIGH = 0x3C9F;  // gear segments 6-7 (azure)
+constexpr uint16_t SEG_OFF  = 0x3BDA;  // unlit RPM segment (mid blue)
+constexpr uint16_t RPM_LOW  = 0x2580;  // RPM gradient start (green)
+constexpr uint16_t RPM_MID  = 0xF600;  // RPM gradient middle (yellow)
+constexpr uint16_t RPM_HIGH = 0xE082;  // RPM gradient end / limiter (red)
 constexpr uint16_t WHITE    = 0xFFFF;
 constexpr uint16_t DKRED    = 0x8082;  // alert banner off-pulse
 }
@@ -29,16 +29,16 @@ constexpr int W = 160, H = 80;
 // outer frame
 constexpr int FRAME_X = 1, FRAME_Y = 1, FRAME_W = 158, FRAME_H = 78, FRAME_R = 4;
 
-// gear bar 1-7
-constexpr int BAR_X = 4, BAR_Y = 3, BAR_W = 152, BAR_H = 13;
-constexpr int BAR_SEGS = 7;
-constexpr int SEG_W = BAR_W / BAR_SEGS;              // 21 px
+// RPM bar: many thin gradient steps (green → yellow → red)
+constexpr int BAR_X = 5, BAR_Y = 3, BAR_W = 150, BAR_H = 13;
+constexpr int BAR_SEGS = 30;
+constexpr int SEG_W = BAR_W / BAR_SEGS;              // 5 px (4 + 1 gap)
 
 // racing swoosh under the bar
 constexpr int SWOOSH_Y = 18;
 
-// central RPM area
-constexpr int RPM_X = 8, RPM_Y = 22, RPM_W = 95, RPM_H = 22;
+// central RPM area (lowered so it doesn't crowd the bar above)
+constexpr int RPM_X = 8, RPM_Y = 25, RPM_W = 95, RPM_H = 22;
 
 // gear box right
 constexpr int GBOX_X = 112, GBOX_Y = 21, GBOX_W = 40, GBOX_H = 30, GBOX_R = 4;
@@ -90,26 +90,30 @@ void SceneDashboard::_drawFrame() {
                        Lay::FRAME_W, Lay::FRAME_H, Lay::FRAME_R, Col::INK);
 }
 
-// Gear bar 1-7: fixed segment colors, current gear highlighted
-void SceneDashboard::_drawGearBar(int current_gear, bool flash_on) {
+// RPM bar: 30 thin segments with a green→yellow→red gradient, lit up
+// to the current RPM. At the limiter the WHOLE bar strobes red.
+void SceneDashboard::_drawRPMBar(float rpm, bool flash_on) {
     using namespace Lay;
-    for (int i = 0; i < BAR_SEGS; i++) {
-        int g  = i + 1;
-        int x  = BAR_X + i * SEG_W;
-        uint16_t seg = (g <= 3) ? Col::SEG_LOW
-                     : (g <= 5) ? Col::SEG_MID
-                     :            Col::SEG_HIGH;
-        bool active = (g == current_gear);
-        if (active) seg = flash_on ? Col::WHITE : Col::GEAR_ON;
+    float pct = Anim::clamp01(rpm / SIM_MAX_RPM);
+    int   lit = (int)(pct * BAR_SEGS + 0.5f);
+    bool  limiter = rpm >= REDLINE_RPM;
 
-        _spr.fillRect(x, BAR_Y, SEG_W - 1, BAR_H, seg);
-        if (active) {
-            _spr.drawRect(x, BAR_Y, SEG_W - 1, BAR_H, Col::INK);
-            _spr.drawRect(x + 1, BAR_Y + 1, SEG_W - 3, BAR_H - 2, Col::INK);
+    for (int i = 0; i < BAR_SEGS; i++) {
+        int x = BAR_X + i * SEG_W;
+        uint16_t col;
+        if (limiter) {
+            // limiter: full bar flashes red / dark red
+            col = flash_on ? Col::RPM_HIGH : Col::DKRED;
+        } else if (i < lit) {
+            // two-stage gradient across the lit segments
+            float t = (float)i / (BAR_SEGS - 1);
+            col = (t < 0.5f)
+                ? Anim::lerp565(Col::RPM_LOW, Col::RPM_MID, t * 2.0f)
+                : Anim::lerp565(Col::RPM_MID, Col::RPM_HIGH, (t - 0.5f) * 2.0f);
+        } else {
+            col = Col::SEG_OFF;
         }
-        char n[2] = {(char)('0' + g), 0};
-        _drawCenteredText(n, x, BAR_Y, SEG_W - 1, BAR_H,
-                          &lgfx::fonts::Font0, Col::INK);
+        _spr.fillRect(x, BAR_Y, SEG_W - 1, BAR_H, col);
     }
     _spr.drawRect(Lay::BAR_X - 1, Lay::BAR_Y - 1,
                   Lay::BAR_W + 2, Lay::BAR_H + 2, Col::INK);
@@ -144,9 +148,10 @@ void SceneDashboard::_drawRPM(float rpm) {
 
     _spr.setTextDatum(lgfx::BL_DATUM);
     _spr.setFont(&lgfx::fonts::Font4);
-    _spr.setTextColor(Col::INK);
+    _spr.setTextColor(Col::ACCENT);          // red value
     _spr.drawString(val, x0, bl);
     _spr.setFont(&lgfx::fonts::Font2);
+    _spr.setTextColor(Col::INK);
     _spr.drawString("RPM", x0 + vw + 5, bl - 1);
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
@@ -291,10 +296,10 @@ void SceneDashboard::_renderBoot(const VehicleState& s, const UiFx& fx) {
         _spr.setTextDatum(lgfx::TL_DATUM);
 
     } else if (t < BOOT_LOGO_MS + BOOT_SWEEP_MS) {
-        // Gauge check: the gear highlight sweeps 1→7→1
+        // Gauge check: RPM bar sweeps 0→max→0
         _drawFrame();
         float sweep = Anim::triangle(Anim::progress(t, BOOT_LOGO_MS, BOOT_SWEEP_MS));
-        _drawGearBar(1 + (int)(sweep * (Lay::BAR_SEGS - 1) + 0.5f), false);
+        _drawRPMBar(sweep * (REDLINE_RPM - 100.0f), false);
         _drawSwoosh();
         _drawRPM(8888.0f);
         _drawGearBox(8, false, fx);
@@ -318,7 +323,9 @@ void SceneDashboard::_renderLive(const VehicleState& s, const UiFx& fx,
     bool flash_on = fx.redline && Anim::pulse(fx.now_ms, SHIFT_FLASH_MS);
 
     _drawFrame();
-    _drawGearBar(s.gear, flash_on);
+    float rpm_bar = _rpmF.update(s.rpm, fx.now_ms,
+                                 RPM_ATTACK_MS, RPM_RELEASE_MS);
+    _drawRPMBar(rpm_bar, flash_on);
     _drawSwoosh();
     _drawRPM(s.rpm);                    // raw: RPM jitter keeps it alive
     _drawGearBox(s.gear, s.drive_auto, fx);
@@ -352,7 +359,7 @@ void SceneDashboard::_renderFinish(const VehicleState& s, const UiFx& fx,
     if (fx.phase_ms < FINISH_SHUTDOWN_MS) {
         float p = (float)fx.phase_ms / FINISH_SHUTDOWN_MS;
         if (p < 0.25f) _drawRows(s, stats);
-        if (p < 0.45f) { _drawGearBar(s.gear, false); _drawSwoosh(); }
+        if (p < 0.45f) { _drawRPMBar(_rpmF.value, false); _drawSwoosh(); }
         if (p < 0.70f) _drawGearBox(s.gear, s.drive_auto, fx);
         if (p < 0.85f) _drawRPM(s.rpm);
         return;
