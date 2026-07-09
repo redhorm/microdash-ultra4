@@ -8,6 +8,9 @@
 #include "ui_fonts.h"
 
 // Dashboard renderer for Display A — ST7735  160×80
+// RC telemetry style: light blue theme, RPM band with 1-7 markers,
+// big RPM readout, red gear box, value panels (readability first:
+// the 0.96" panel needs 20-30 px glyphs to be legible).
 class SceneDashboard {
 public:
     explicit SceneDashboard(lgfx::LGFX_Device& disp);
@@ -21,24 +24,25 @@ private:
     UiFonts            _fonts;
 
     // Display-value smoothing (logic lives in core/easing.h)
-    Follow _speedF;   // real clusters never jump 3 mph between frames
-    Follow _rpmF;     // VU-meter: fast attack, slow release
+    Follow _speedF;   // speed panel
+    Follow _rpmF;     // RPM band, VU-meter attack/release
 
     // Phase screens
     void _renderBoot(const VehicleState& s, const UiFx& fx);
-    void _renderLive(const VehicleState& s, const UiFx& fx);
+    void _renderLive(const VehicleState& s, const UiFx& fx,
+                     const RunStats& stats);
     void _renderFinish(const VehicleState& s, const UiFx& fx,
                        const RunStats& stats);
 
-    // Live-frame building blocks
-    void _drawSpeed(int spd);
-    void _drawGear(int g, bool drive_auto, const UiFx& fx);
-    void _drawRPMBarPct(float pct, bool flash_on, int vib_y);
-    void _drawCorners(const VehicleState& s, int vib_y);
-    void _drawBottomRow(const VehicleState& s);
-    void _drawTape(float heading_deg);
+    // Building blocks
+    void _drawBand(float rpm, bool flash_on, int vib_y);
+    void _drawHero(float rpm);
+    void _drawGearBox(int g, bool drive_auto, const UiFx& fx);
+    void _drawPanel(int x, int y, int w, int h);
+    void _drawValueUnit(int x, int y, int w, int h,
+                        const char* value, const char* unit);
+    void _drawRows(const VehicleState& s, const RunStats& stats);
     void _drawAlertBanner(const UiFx& fx);
-    void _drawMiniBar(int x, int y, int w, int h, float pct, uint16_t col_fill);
     void _drawCheckerStrip(int y, int h, uint32_t ms);
 };
 

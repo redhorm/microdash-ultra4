@@ -59,7 +59,7 @@
 // Unit preferences
 // ----------------------------------------------------------------
 #define USE_KMH     false   // false = MPH, true = km/h
-#define USE_CELSIUS false   // false = °F,  true = °C
+#define USE_CELSIUS true    // false = °F,  true = °C (stile telemetria RC)
 
 // ----------------------------------------------------------------
 // Simulator limits
@@ -133,6 +133,7 @@
 #define SIM_BAT_SAG_DN_MS   4000.0f  // tau recupero (lento)
 #define SIM_TEMP_HEAT_RATE     0.45f // 1/s: scalda in fretta...
 #define SIM_TEMP_COOL_RATE     0.05f // ...raffredda piano
+#define SIM_ESC_HEAT_RATE      0.70f // ESC: massa termica piccola, spike rapidi
 #define VIB_MAX_PX             1     // tremolio barre (solo LIVE)
 #define VIB_PERIOD_MS         45
 

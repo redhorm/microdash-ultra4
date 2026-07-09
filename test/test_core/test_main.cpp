@@ -510,6 +510,33 @@ static void test_sim_thermal_inertia_asymmetric() {
     TEST_ASSERT_TRUE(rise > fall * 2.0f); // ...but much more slowly
 }
 
+static void test_sim_esc_heats_faster_than_motor() {
+    Simulator sim;
+    sim.reset();
+    float motor0 = sim.state.engine_temp_f;
+    float esc0   = sim.state.esc_temp_f;
+
+    sim.setInputs(1.0f, 0.0f);           // 3 s full load
+    for (int i = 0; i < 90; i++) sim.update(33);
+
+    float motor_rise = sim.state.engine_temp_f - motor0;
+    float esc_rise   = sim.state.esc_temp_f - esc0;
+    TEST_ASSERT_TRUE(esc_rise > 20.0f);          // ESC spikes for real
+    TEST_ASSERT_TRUE(esc_rise > motor_rise);     // smaller thermal mass
+
+    for (int i = 0; i < 3000; i++) sim.update(33);   // long soak: bounded
+    TEST_ASSERT_TRUE(sim.state.esc_temp_f <= 250.0f);
+    TEST_ASSERT_TRUE(sim.state.esc_temp_f >= 110.0f);
+}
+
+static void test_fmt_temp_plain() {
+    char b[8];
+    Fmt::tempPlain(b, 212.0f);
+    TEST_ASSERT_EQUAL_STRING("212F", b);
+    Fmt::tempPlain(b, 212.0f, true);     // 212 °F = 100 °C
+    TEST_ASSERT_EQUAL_STRING("100C", b);
+}
+
 // ── Compass tape (hero detail) ───────────────────────────────────────────────
 
 static void test_compass_north_centered() {
@@ -703,6 +730,9 @@ int main(int, char**) {
     RUN_TEST(test_sim_rpm_jitter_alive_but_bounded);
     RUN_TEST(test_sim_battery_sags_and_recovers);
     RUN_TEST(test_sim_thermal_inertia_asymmetric);
+
+    RUN_TEST(test_sim_esc_heats_faster_than_motor);
+    RUN_TEST(test_fmt_temp_plain);
 
     RUN_TEST(test_compass_north_centered);
     RUN_TEST(test_compass_wraparound);

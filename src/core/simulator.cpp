@@ -125,6 +125,14 @@ void Simulator::_updateThermal(float dt_s) {
     float alpha  = 1.0f - expf(-dt_s * rate);
     state.engine_temp_f += (target - state.engine_temp_f) * alpha;
     state.engine_temp_f  = clampf(state.engine_temp_f, 140.0f, 265.0f);
+
+    // ESC: smaller thermal mass — spikes faster under load, same slow cooling
+    float esc_target = 125.0f + _throttle * 115.0f;
+    float esc_rate   = (esc_target > state.esc_temp_f) ? SIM_ESC_HEAT_RATE
+                                                       : SIM_TEMP_COOL_RATE;
+    float esc_alpha  = 1.0f - expf(-dt_s * esc_rate);
+    state.esc_temp_f += (esc_target - state.esc_temp_f) * esc_alpha;
+    state.esc_temp_f  = clampf(state.esc_temp_f, 110.0f, 250.0f);
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────────

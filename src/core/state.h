@@ -12,7 +12,8 @@ struct VehicleState {
 
     // ── Electrical / thermal ────────────────────────────────────
     float   battery_v    = 14.4f;  // 10 – 16 V
-    float   engine_temp_f= 160.0f; // ambient..260 °F
+    float   engine_temp_f= 160.0f; // motor temp, ambient..260 °F
+    float   esc_temp_f   = 130.0f; // ESC temp, heats faster than motor
     float   fuel_pct     = 0.80f;  // 0 – 1
 
     // ── Navigation ──────────────────────────────────────────────

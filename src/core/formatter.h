@@ -18,6 +18,10 @@ void battery(char* buf, float v);
 // "210°F" / "99°C" (° = \xF8, CP437/GLCD encoding) — buf ≥8
 void temp(char* buf, float f, bool use_celsius = false);
 
+// "99C" / "210F" — no degree sign, safe for VLW fonts (which have no
+// ° glyph and decode UTF-8) — buf ≥6
+void tempPlain(char* buf, float f, bool use_celsius = false);
+
 // "NW" "N" "NNE" etc. — buf ≥4
 void heading(char* buf, float deg);
 

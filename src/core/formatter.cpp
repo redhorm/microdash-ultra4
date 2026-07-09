@@ -28,6 +28,13 @@ void temp(char* buf, float f, bool use_celsius) {
         snprintf(buf, 8, "%d\xF8""F", (int)f);
 }
 
+void tempPlain(char* buf, float f, bool use_celsius) {
+    if (use_celsius)
+        snprintf(buf, 6, "%dC", (int)((f - 32.0f) * 5.0f / 9.0f));
+    else
+        snprintf(buf, 6, "%dF", (int)f);
+}
+
 static const char* CARD8[] = {
     "N","NE","E","SE","S","SW","W","NW"
 };
