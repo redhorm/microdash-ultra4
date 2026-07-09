@@ -23,19 +23,19 @@ static constexpr uint16_t C_RAMP[7] = {
 
 // ── Layout (160 × 80) ────────────────────────────────────────────────────────
 //  y 1..13   RPM band, 7 cells with 1-7 markers
-//  y 14..44  hero "5494 RPM" (30 px) · red gear box right
-//  y 46..61  row 1: SPEED · LAP TIME panels
-//  y 63..78  row 2: MOTOR · ESC · BATTERY panels
+//  y 15..41  hero "5494 RPM" (Font4 26 px) · red gear box right
+//  y 44..60  row 1: SPEED · LAP TIME panels
+//  y 62..78  row 2: MOTOR · ESC · BATTERY panels
 static constexpr int W = 160, H = 80;
 
 static constexpr int BAND_X = 2,  BAND_Y = 1,  BAND_W = 155, BAND_H = 13;
 static constexpr int BAND_CELLS = 7;                  // 1000-RPM markers
 
-static constexpr int HERO_X  = 4,  HERO_BL = 44;      // hero baseline
-static constexpr int GBOX_X  = 122, GBOX_Y = 15;      // gear box
-static constexpr int GBOX_W  = 36,  GBOX_H = 34;
+static constexpr int HERO_X = 4,  HERO_Y = 15;        // Font4 top edge
+static constexpr int GBOX_X = 122, GBOX_Y = 15;       // gear box
+static constexpr int GBOX_W = 36,  GBOX_H = 27;
 
-static constexpr int ROW1_Y = 46, ROW2_Y = 63, ROW_H = 16;
+static constexpr int ROW1_Y = 44, ROW2_Y = 62, ROW_H = 16;
 
 SceneDashboard::SceneDashboard(lgfx::LGFX_Device& disp)
     : _spr(&disp), _disp(disp) {}
@@ -44,7 +44,6 @@ void SceneDashboard::init() {
     _spr.setColorDepth(16);
     _spr.setPsram(false);          // keep in internal RAM → DMA-friendly
     _spr.createSprite(W, H);
-    _fonts.init();
 }
 
 void SceneDashboard::push() {
@@ -58,25 +57,25 @@ void SceneDashboard::_drawPanel(int x, int y, int w, int h) {
     _spr.drawRoundRect(x, y, w, h, 3, C_NAVY);
 }
 
-// Panel + big value + small unit, baseline-aligned, centered as a group
+// Panel + big value (Font2, 16 px) + small unit, centered as a group
 void SceneDashboard::_drawValueUnit(int x, int y, int w, int h,
                                     const char* value, const char* unit) {
     _drawPanel(x, y, w, h);
     _spr.setTextSize(1);
-    _spr.setFont(&_fonts.med);
+    _spr.setFont(&lgfx::fonts::Font2);
     int vw = _spr.textWidth(value);
-    _spr.setFont(&_fonts.small);
+    _spr.setFont(&lgfx::fonts::Font0);
     int uw = unit[0] ? _spr.textWidth(unit) + 2 : 0;
     int x0 = x + (w - vw - uw) / 2;
     int bl = y + h - 2;
 
     _spr.setTextDatum(lgfx::BL_DATUM);
-    _spr.setFont(&_fonts.med);
-    _spr.setTextColor(C_NAVY);
+    _spr.setFont(&lgfx::fonts::Font2);
+    _spr.setTextColor(C_NAVY, C_PANEL);
     _spr.drawString(value, x0, bl);
     if (unit[0]) {
-        _spr.setFont(&_fonts.small);
-        _spr.drawString(unit, x0 + vw + 2, bl - 1);
+        _spr.setFont(&lgfx::fonts::Font0);
+        _spr.drawString(unit, x0 + vw + 2, bl - 2);
     }
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
@@ -108,14 +107,12 @@ void SceneDashboard::_drawHero(float rpm) {
     snprintf(buf, sizeof(buf), "%d", (int)rpm);
 
     _spr.setTextSize(1);
-    _spr.setTextDatum(lgfx::BL_DATUM);
-    _spr.setFont(&_fonts.hero);
-    _spr.setTextColor(C_NAVY);
-    _spr.drawString(buf, HERO_X, HERO_BL);
+    _spr.setFont(&lgfx::fonts::Font4);      // 26 px
+    _spr.setTextColor(C_NAVY, C_SKY);
+    _spr.drawString(buf, HERO_X, HERO_Y);
     int vw = _spr.textWidth(buf);
-    _spr.setFont(&_fonts.med);
-    _spr.drawString("RPM", HERO_X + vw + 5, HERO_BL);
-    _spr.setTextDatum(lgfx::TL_DATUM);
+    _spr.setFont(&lgfx::fonts::Font2);
+    _spr.drawString("RPM", HERO_X + vw + 5, HERO_Y + 9);
 }
 
 // Red gear letter in a white rounded box (reference style)
@@ -132,9 +129,9 @@ void SceneDashboard::_drawGearBox(int g, bool drive_auto, const UiFx& fx) {
 
     // Snap animation on gear change (130% → 100%)
     float scale = Anim::snapScale(fx.gear_snap_p, GEAR_SNAP_SCALE);
-    _spr.setFont(&_fonts.hero);
+    _spr.setFont(&lgfx::fonts::Font4);
     _spr.setTextSize(scale);
-    _spr.setTextColor(C_REDD);
+    _spr.setTextColor(C_REDD, C_WHITE);
     _spr.setTextDatum(lgfx::MC_DATUM);
     _spr.drawString(buf, GBOX_X + GBOX_W / 2, GBOX_Y + GBOX_H / 2 + 1);
     _spr.setTextSize(1);
@@ -186,9 +183,9 @@ void SceneDashboard::_drawAlertBanner(const UiFx& fx) {
 
     char msg[32];
     snprintf(msg, sizeof(msg), "%s %s", fx.alert_info, fx.alert_note);
-    _spr.setFont(&_fonts.small);
+    _spr.setFont(&lgfx::fonts::Font2);
     _spr.setTextSize(1);
-    _spr.setTextColor(border);
+    _spr.setTextColor(border, bg);
     _spr.setTextDatum(lgfx::MC_DATUM);
     _spr.drawString(msg, W / 2, y + bh / 2);
     _spr.setTextDatum(lgfx::TL_DATUM);
@@ -210,15 +207,16 @@ void SceneDashboard::_renderBoot(const VehicleState& s, const UiFx& fx) {
     if (t < BOOT_LOGO_MS) {
         // Wordmark fade-in from the sky background
         float p = Anim::easeOutCubic(Anim::progress(t, 0, BOOT_LOGO_MS));
-        _spr.setFont(&_fonts.hero);
+        _spr.setFont(&lgfx::fonts::Font4);
         _spr.setTextSize(1);
-        _spr.setTextColor(Anim::lerp565(C_SKY, C_NAVY, p));
+        _spr.setTextColor(Anim::lerp565(C_SKY, C_NAVY, p), C_SKY);
         _spr.setTextDatum(lgfx::MC_DATUM);
-        _spr.drawString("ULTRA4", W / 2, 34);
+        _spr.drawString("ULTRA4", W / 2, 32);
         if (p > 0.5f) {
-            _spr.setFont(&_fonts.small);
-            _spr.setTextColor(Anim::lerp565(C_SKY, C_REDD, (p - 0.5f) * 2.0f));
-            _spr.drawString("MICRODASH RC", W / 2, 60);
+            _spr.setFont(&lgfx::fonts::Font0);
+            _spr.setTextColor(Anim::lerp565(C_SKY, C_REDD, (p - 0.5f) * 2.0f),
+                              C_SKY);
+            _spr.drawString("MICRODASH RC", W / 2, 56);
         }
         _spr.setTextDatum(lgfx::TL_DATUM);
 
@@ -228,21 +226,21 @@ void SceneDashboard::_renderBoot(const VehicleState& s, const UiFx& fx) {
         _drawBand(sweep * SIM_MAX_RPM, false, 0);
         _drawHero(8888.0f);
         _drawGearBox(8, false, fx);
-        _spr.setFont(&_fonts.small);
-        _spr.setTextColor(C_NAVY);
+        _spr.setFont(&lgfx::fonts::Font0);
+        _spr.setTextColor(C_NAVY, C_SKY);
         _spr.setTextDatum(lgfx::TC_DATUM);
-        _spr.drawString("SELF CHECK", W / 2, ROW2_Y + 2);
+        _spr.drawString("SELF CHECK", W / 2, ROW2_Y + 4);
         _spr.setTextDatum(lgfx::TL_DATUM);
 
     } else {
         // Values settle on the real (idle) state + READY pulse
         _renderLive(s, fx, RunStats{});
         if (Anim::pulse(t, 220)) {
-            _drawPanel(50, 30, 60, 20);
-            _spr.setFont(&_fonts.med);
-            _spr.setTextColor(C_NAVY);
+            _drawPanel(50, 28, 60, 22);
+            _spr.setFont(&lgfx::fonts::Font2);
+            _spr.setTextColor(C_NAVY, C_PANEL);
             _spr.setTextDatum(lgfx::MC_DATUM);
-            _spr.drawString("READY", W / 2, 40);
+            _spr.drawString("READY", W / 2, 39);
             _spr.setTextDatum(lgfx::TL_DATUM);
         }
     }
@@ -299,18 +297,18 @@ void SceneDashboard::_renderFinish(const VehicleState& s, const UiFx& fx,
     _drawCheckerStrip(0, 8, fx.now_ms);
     _drawCheckerStrip(H - 8, 8, fx.now_ms);
 
-    _spr.setFont(&_fonts.hero);
+    _spr.setFont(&lgfx::fonts::Font4);
     _spr.setTextSize(1);
-    _spr.setTextColor(C_NAVY);
+    _spr.setTextColor(C_NAVY, C_SKY);
     _spr.setTextDatum(lgfx::TC_DATUM);
     _spr.drawString("FINISH", W / 2, 12);
     _spr.setTextDatum(lgfx::TL_DATUM);
 
     char buf[10];
     Fmt::speed(buf, stats.max_speed_mph, USE_KMH);
-    _drawValueUnit(6, 48, 70, 22, buf, USE_KMH ? "KMH MAX" : "MPH MAX");
+    _drawValueUnit(6, 46, 70, 22, buf, USE_KMH ? "KMH MAX" : "MPH MAX");
     Fmt::rpm(buf, stats.max_rpm);
-    _drawValueUnit(84, 48, 70, 22, buf, "RPM");
+    _drawValueUnit(84, 46, 70, 22, buf, "RPM");
 }
 
 // ── Dispatcher ───────────────────────────────────────────────────────────────

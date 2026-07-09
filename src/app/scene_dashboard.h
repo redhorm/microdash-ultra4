@@ -5,12 +5,12 @@
 #include "core/state.h"
 #include "core/race.h"
 #include "core/easing.h"
-#include "ui_fonts.h"
 
 // Dashboard renderer for Display A — ST7735  160×80
 // RC telemetry style: light blue theme, RPM band with 1-7 markers,
-// big RPM readout, red gear box, value panels (readability first:
-// the 0.96" panel needs 20-30 px glyphs to be legible).
+// big RPM readout, red gear box, value panels.
+// Built-in bitmap fonts ONLY: VLW glyphs render corrupted on this
+// panel/sprite combination, bitmap fonts are proven on it.
 class SceneDashboard {
 public:
     explicit SceneDashboard(lgfx::LGFX_Device& disp);
@@ -21,7 +21,6 @@ public:
 private:
     LGFX_Sprite        _spr;
     lgfx::LGFX_Device& _disp;
-    UiFonts            _fonts;
 
     // Display-value smoothing (logic lives in core/easing.h)
     Follow _speedF;   // speed panel

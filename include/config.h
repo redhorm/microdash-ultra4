@@ -32,7 +32,7 @@
 // ----------------------------------------------------------------
 #define DISP_A_COL_OFFSET   26
 #define DISP_A_ROW_OFFSET    1
-#define DISP_A_INVERT     false   // try true if colors are inverted
+#define DISP_A_INVERT     true    // IPS 0.96" modules need inversion ON
 #define DISP_A_RGB_ORDER  false   // false = BGR (default for ST7735)
 #define DISP_A_ROTATION      1    // 1/3 = landscape 160×80 (module native is portrait 80×160)
 
