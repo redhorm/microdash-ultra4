@@ -4,164 +4,234 @@
 #include "scene_dashboard.h"
 #include "core/formatter.h"
 #include "core/anim.h"
-#include "core/noise.h"
 #include "config.h"
 
-// ── Palette (RGB565) — RC telemetry light theme ─────────────────────────────
-static constexpr uint16_t C_SKY   = 0x4D5D; // sky-blue background
-static constexpr uint16_t C_PANEL = 0xAEFE; // pale panel background
-static constexpr uint16_t C_NAVY  = 0x11D0; // dark navy ink
-static constexpr uint16_t C_REDD  = 0xD904; // gear letter / redline
-static constexpr uint16_t C_WHITE = 0xFFFF;
-static constexpr uint16_t C_CELL  = 0x3BDA; // unlit band cell (mid blue)
-static constexpr uint16_t C_DKRED = 0x8082; // alert banner off-pulse
+// ── Palette (RGB565) — racing light-blue theme ──────────────────────────────
+namespace Col {
+constexpr uint16_t SKY      = 0x4D5D;  // main background
+constexpr uint16_t BOX_BG   = 0xAEFE;  // pale box interior
+constexpr uint16_t BOX_HI   = 0xD73F;  // gear-box interior (lighter)
+constexpr uint16_t INK      = 0x11D0;  // dark navy: values, borders
+constexpr uint16_t INK_MID  = 0x2AF5;  // medium blue: labels, box borders
+constexpr uint16_t ACCENT   = 0xD904;  // red/orange: big gear letter
+constexpr uint16_t GEAR_ON  = 0xFD20;  // active gear highlight (orange)
+constexpr uint16_t SEG_LOW  = 0x5E46;  // gear segments 1-3 (green)
+constexpr uint16_t SEG_MID  = 0xF5A3;  // gear segments 4-5 (yellow/orange)
+constexpr uint16_t SEG_HIGH = 0x3C9F;  // gear segments 6-7 (azure)
+constexpr uint16_t WHITE    = 0xFFFF;
+constexpr uint16_t DKRED    = 0x8082;  // alert banner off-pulse
+}
 
-// RPM band gradient, one color per 1000-RPM cell (green → orange)
-static constexpr uint16_t C_RAMP[7] = {
-    0x5E46, 0x8685, 0xB6E5, 0xE684, 0xF5A3, 0xF4A3, 0xF383
-};
+// ── Layout constants — canvas 160×80, 2 px safe margin ─────────────────────
+namespace Lay {
+constexpr int W = 160, H = 80;
 
-// ── Layout (160 × 80) ────────────────────────────────────────────────────────
-//  y 1..13   RPM band, 7 cells with 1-7 markers
-//  y 15..41  hero "5494 RPM" (Font4 26 px) · red gear box right
-//  y 44..60  row 1: SPEED · LAP TIME panels
-//  y 62..78  row 2: MOTOR · ESC · BATTERY panels
-static constexpr int W = 160, H = 80;
+// outer frame
+constexpr int FRAME_X = 1, FRAME_Y = 1, FRAME_W = 158, FRAME_H = 78, FRAME_R = 4;
 
-static constexpr int BAND_X = 2,  BAND_Y = 1,  BAND_W = 155, BAND_H = 13;
-static constexpr int BAND_CELLS = 7;                  // 1000-RPM markers
+// gear bar 1-7
+constexpr int BAR_X = 4, BAR_Y = 3, BAR_W = 152, BAR_H = 13;
+constexpr int BAR_SEGS = 7;
+constexpr int SEG_W = BAR_W / BAR_SEGS;              // 21 px
 
-static constexpr int HERO_X = 4,  HERO_Y = 15;        // Font4 top edge
-static constexpr int GBOX_X = 122, GBOX_Y = 15;       // gear box
-static constexpr int GBOX_W = 36,  GBOX_H = 27;
+// racing swoosh under the bar
+constexpr int SWOOSH_Y = 18;
 
-static constexpr int ROW1_Y = 44, ROW2_Y = 62, ROW_H = 16;
+// central RPM area
+constexpr int RPM_X = 8, RPM_Y = 22, RPM_W = 95, RPM_H = 22;
+
+// gear box right
+constexpr int GBOX_X = 112, GBOX_Y = 21, GBOX_W = 40, GBOX_H = 30, GBOX_R = 4;
+
+// middle row: GEAR / LAP TIME
+constexpr int CAR_X = 8,  CAR_Y = 48, CAR_W = 45, CAR_H = 14;
+constexpr int LAP_X = 57, LAP_Y = 48, LAP_W = 55, LAP_H = 14;
+
+// bottom row: MOTOR / ESC / VOLTAGE
+constexpr int BOT_Y = 63, BOT_H = 14, BOT_W = 48;
+constexpr int BOT1_X = 4, BOT2_X = 56, BOT3_X = 108;
+constexpr int BOX_R = 3;
+}
 
 SceneDashboard::SceneDashboard(lgfx::LGFX_Device& disp)
     : _spr(&disp), _disp(disp) {}
 
 void SceneDashboard::init() {
     _spr.setColorDepth(16);
-    _spr.setPsram(false);          // keep in internal RAM → DMA-friendly
-    _spr.createSprite(W, H);
+    _spr.setPsram(false);          // internal RAM → DMA-friendly
+    _spr.createSprite(Lay::W, Lay::H);
 }
 
 void SceneDashboard::push() {
     _spr.pushSprite(&_disp, 0, 0);
 }
 
+// ── Text helper ──────────────────────────────────────────────────────────────
+
+// Centers txt inside the (x,y,w,h) box, transparent background so it
+// composes over fills and borders without erasing them.
+void SceneDashboard::_drawCenteredText(const char* txt, int x, int y,
+                                       int w, int h,
+                                       const lgfx::IFont* font,
+                                       uint16_t color) {
+    _spr.setFont(font);
+    _spr.setTextSize(1);
+    _spr.setTextColor(color);
+    _spr.setTextDatum(lgfx::MC_DATUM);
+    _spr.drawString(txt, x + w / 2, y + h / 2);
+    _spr.setTextDatum(lgfx::TL_DATUM);
+}
+
 // ── Building blocks ──────────────────────────────────────────────────────────
 
-void SceneDashboard::_drawPanel(int x, int y, int w, int h) {
-    _spr.fillRoundRect(x, y, w, h, 3, C_PANEL);
-    _spr.drawRoundRect(x, y, w, h, 3, C_NAVY);
+void SceneDashboard::_drawFrame() {
+    _spr.fillScreen(Col::SKY);
+    _spr.drawRoundRect(Lay::FRAME_X, Lay::FRAME_Y,
+                       Lay::FRAME_W, Lay::FRAME_H, Lay::FRAME_R, Col::INK);
 }
 
-// Panel + big value (Font2, 16 px) + small unit, centered as a group
-void SceneDashboard::_drawValueUnit(int x, int y, int w, int h,
-                                    const char* value, const char* unit) {
-    _drawPanel(x, y, w, h);
+// Gear bar 1-7: fixed segment colors, current gear highlighted
+void SceneDashboard::_drawGearBar(int current_gear, bool flash_on) {
+    using namespace Lay;
+    for (int i = 0; i < BAR_SEGS; i++) {
+        int g  = i + 1;
+        int x  = BAR_X + i * SEG_W;
+        uint16_t seg = (g <= 3) ? Col::SEG_LOW
+                     : (g <= 5) ? Col::SEG_MID
+                     :            Col::SEG_HIGH;
+        bool active = (g == current_gear);
+        if (active) seg = flash_on ? Col::WHITE : Col::GEAR_ON;
+
+        _spr.fillRect(x, BAR_Y, SEG_W - 1, BAR_H, seg);
+        if (active) {
+            _spr.drawRect(x, BAR_Y, SEG_W - 1, BAR_H, Col::INK);
+            _spr.drawRect(x + 1, BAR_Y + 1, SEG_W - 3, BAR_H - 2, Col::INK);
+        }
+        char n[2] = {(char)('0' + g), 0};
+        _drawCenteredText(n, x, BAR_Y, SEG_W - 1, BAR_H,
+                          &lgfx::fonts::Font0, Col::INK);
+    }
+    _spr.drawRect(Lay::BAR_X - 1, Lay::BAR_Y - 1,
+                  Lay::BAR_W + 2, Lay::BAR_H + 2, Col::INK);
+}
+
+// Two thin racing lines under the bar, dipping at the left (mockup style)
+void SceneDashboard::_drawSwoosh() {
+    using namespace Lay;
+    for (int k = 0; k < 2; k++) {
+        int y = SWOOSH_Y + k * 2;
+        _spr.drawFastHLine(26, y, W - 26 - 4, Col::INK);
+        // small curve bending down toward the left edge
+        _spr.drawLine(26, y, 12, y + 3, Col::INK);
+        _spr.drawLine(12, y + 3, 4, y + 6, Col::INK);
+    }
+}
+
+// Dominant RPM readout, value+unit centered as a group on one baseline
+void SceneDashboard::_drawRPM(float rpm) {
+    using namespace Lay;
+    char val[8];
+    snprintf(val, sizeof(val), "%d", (int)rpm);
+
     _spr.setTextSize(1);
-    _spr.setFont(&lgfx::fonts::Font2);
-    int vw = _spr.textWidth(value);
-    _spr.setFont(&lgfx::fonts::Font0);
-    int uw = unit[0] ? _spr.textWidth(unit) + 2 : 0;
-    int x0 = x + (w - vw - uw) / 2;
-    int bl = y + h - 2;
+    _spr.setFont(&lgfx::fonts::Font4);          // 26 px value
+    int vw = _spr.textWidth(val);
+    _spr.setFont(&lgfx::fonts::Font2);          // 16 px unit
+    int uw = _spr.textWidth("RPM");
+    int total = vw + 5 + uw;
+    int x0 = RPM_X + (RPM_W - total) / 2;
+    int bl = RPM_Y + RPM_H - 1;                 // shared baseline
 
     _spr.setTextDatum(lgfx::BL_DATUM);
+    _spr.setFont(&lgfx::fonts::Font4);
+    _spr.setTextColor(Col::INK);
+    _spr.drawString(val, x0, bl);
     _spr.setFont(&lgfx::fonts::Font2);
-    _spr.setTextColor(C_NAVY, C_PANEL);
-    _spr.drawString(value, x0, bl);
-    if (unit[0]) {
-        _spr.setFont(&lgfx::fonts::Font0);
-        _spr.drawString(unit, x0 + vw + 2, bl - 2);
-    }
+    _spr.drawString("RPM", x0 + vw + 5, bl - 1);
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
 
-// RPM band: 7 gradient zones of 1000 RPM, filled CONTINUOUSLY like a
-// real tach needle (the current cell fills partially — all-or-nothing
-// cells looked frozen while cruising inside one 1000-RPM zone).
-void SceneDashboard::_drawBand(float rpm, bool flash_on, int vib_y) {
-    int y = BAND_Y + vib_y;
-    int cell_w = BAND_W / BAND_CELLS;   // 22 px
-
-    for (int i = 0; i < BAND_CELLS; i++) {
-        int x0 = BAND_X + i * cell_w;
-        int w  = cell_w - 1;
-        float p = Anim::clamp01((rpm - i * 1000.0f) / 1000.0f);
-        int lit = (int)(p * w + 0.5f);
-        uint16_t col = (i >= 5 && flash_on) ? C_WHITE : C_RAMP[i];
-        if (lit > 0) _spr.fillRect(x0, y, lit, BAND_H, col);
-        if (lit < w) _spr.fillRect(x0 + lit, y, w - lit, BAND_H, C_CELL);
-
-        char n[2] = {(char)('1' + i), 0};
-        _spr.setFont(&lgfx::fonts::Font0);
-        _spr.setTextSize(1);
-        _spr.setTextColor(C_NAVY);           // transparent bg over the fill
-        _spr.setTextDatum(lgfx::TC_DATUM);
-        _spr.drawString(n, x0 + cell_w / 2, y + 3);
-    }
-    _spr.setTextDatum(lgfx::TL_DATUM);
-    _spr.drawRoundRect(BAND_X - 1, y - 1, BAND_W + 2, BAND_H + 2, 2, C_NAVY);
-}
-
-void SceneDashboard::_drawHero(float rpm) {
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%d", (int)rpm);
-
-    _spr.setTextSize(1);
-    _spr.setFont(&lgfx::fonts::Font4);      // 26 px
-    _spr.setTextColor(C_NAVY, C_SKY);
-    _spr.drawString(buf, HERO_X, HERO_Y);
-    int vw = _spr.textWidth(buf);
-    _spr.setFont(&lgfx::fonts::Font2);
-    _spr.drawString("RPM", HERO_X + vw + 5, HERO_Y + 9);
-}
-
-// Red gear letter in a white rounded box (reference style)
+// Big gear letter, red on a lighter box (reference style)
 void SceneDashboard::_drawGearBox(int g, bool drive_auto, const UiFx& fx) {
+    using namespace Lay;
     char buf[4];
     Fmt::gear(buf, g, drive_auto);
 
     bool flash_on = fx.redline && Anim::pulse(fx.now_ms, SHIFT_FLASH_MS);
-    _spr.fillRoundRect(GBOX_X, GBOX_Y, GBOX_W, GBOX_H, 5, C_WHITE);
-    _spr.drawRoundRect(GBOX_X, GBOX_Y, GBOX_W, GBOX_H, 5,
-                       flash_on ? C_REDD : C_NAVY);
-    _spr.drawRoundRect(GBOX_X + 1, GBOX_Y + 1, GBOX_W - 2, GBOX_H - 2, 4,
-                       flash_on ? C_REDD : C_NAVY);
+    _spr.fillRoundRect(GBOX_X, GBOX_Y, GBOX_W, GBOX_H, GBOX_R, Col::BOX_HI);
+    _spr.drawRoundRect(GBOX_X, GBOX_Y, GBOX_W, GBOX_H, GBOX_R,
+                       flash_on ? Col::ACCENT : Col::INK);
+    _spr.drawRoundRect(GBOX_X + 1, GBOX_Y + 1, GBOX_W - 2, GBOX_H - 2,
+                       GBOX_R - 1, flash_on ? Col::ACCENT : Col::INK);
 
     // Snap animation on gear change (130% → 100%)
     float scale = Anim::snapScale(fx.gear_snap_p, GEAR_SNAP_SCALE);
     _spr.setFont(&lgfx::fonts::Font4);
     _spr.setTextSize(scale);
-    _spr.setTextColor(C_REDD, C_WHITE);
+    _spr.setTextColor(Col::ACCENT);
     _spr.setTextDatum(lgfx::MC_DATUM);
     _spr.drawString(buf, GBOX_X + GBOX_W / 2, GBOX_Y + GBOX_H / 2 + 1);
     _spr.setTextSize(1);
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
 
+// Box with centered value; optional tiny label on the left and optional
+// degree ring after the value (Font2 has no ° glyph)
+void SceneDashboard::_drawMetricBox(int x, int y, int w, int h,
+                                    const char* value, const char* label,
+                                    bool degree) {
+    _spr.fillRoundRect(x, y, w, h, Lay::BOX_R, Col::BOX_BG);
+    _spr.drawRoundRect(x, y, w, h, Lay::BOX_R, Col::INK_MID);
+
+    int lx = x, lw = 0;
+    if (label && label[0]) {
+        _spr.setFont(&lgfx::fonts::Font0);
+        lw = _spr.textWidth(label) + 4;
+        _spr.setTextSize(1);
+        _spr.setTextColor(Col::INK_MID);
+        _spr.setTextDatum(lgfx::ML_DATUM);
+        _spr.drawString(label, lx + 3, y + h / 2);
+        _spr.setTextDatum(lgfx::TL_DATUM);
+    }
+
+    // value centered in the remaining width
+    _spr.setFont(&lgfx::fonts::Font2);
+    int vw = _spr.textWidth(value);
+    int vx = x + lw + (w - lw - vw) / 2;
+    _spr.setTextSize(1);
+    _spr.setTextColor(Col::INK);
+    _spr.setTextDatum(lgfx::ML_DATUM);
+    _spr.drawString(value, vx, y + h / 2);
+    _spr.setTextDatum(lgfx::TL_DATUM);
+
+    if (degree)   // small ° ring at the value's top-right
+        _spr.drawCircle(vx + vw + 2, y + h / 2 - 4, 1, Col::INK);
+}
+
 void SceneDashboard::_drawRows(const VehicleState& s, const RunStats& stats) {
+    using namespace Lay;
     char buf[10];
 
-    // Row 1 — SPEED · LAP TIME
-    Fmt::speed(buf, _speedF.value, USE_KMH);
-    _drawValueUnit(2, ROW1_Y, 52, ROW_H, buf, USE_KMH ? "KMH" : "MPH");
+    // middle row: numeric gear + lap time (labels only where they fit)
+    snprintf(buf, sizeof(buf), "%d", s.gear);
+    _drawMetricBox(CAR_X, CAR_Y, CAR_W, CAR_H, buf, "GEAR");
 
     Fmt::raceTime(buf, stats.stage_ms);
-    _drawValueUnit(58, ROW1_Y, 60, ROW_H, buf, "");
+    const char* lap = (buf[0] == '0') ? buf + 1 : buf;   // "0:13.4"
+    _drawMetricBox(LAP_X, LAP_Y, LAP_W, LAP_H, lap, "");
 
-    // Row 2 — MOTOR · ESC · BATTERY
-    Fmt::tempPlain(buf, s.engine_temp_f, USE_CELSIUS);
-    _drawValueUnit(2, ROW2_Y, 50, ROW_H, buf, "MOT");
+    // bottom row: motor / esc / battery ("M"/"E": full labels would
+    // clip 3-digit temps in a 48 px box)
+    snprintf(buf, sizeof(buf), "%d",
+             (int)((s.engine_temp_f - 32.0f) * 5.0f / 9.0f));
+    _drawMetricBox(BOT1_X, BOT_Y, BOT_W, BOT_H, buf, "M", true);
 
-    Fmt::tempPlain(buf, s.esc_temp_f, USE_CELSIUS);
-    _drawValueUnit(55, ROW2_Y, 50, ROW_H, buf, "ESC");
+    snprintf(buf, sizeof(buf), "%d",
+             (int)((s.esc_temp_f - 32.0f) * 5.0f / 9.0f));
+    _drawMetricBox(BOT2_X, BOT_Y, BOT_W, BOT_H, buf, "E", true);
 
-    snprintf(buf, sizeof(buf), "%.1f", s.battery_v);
-    _drawValueUnit(108, ROW2_Y, 49, ROW_H, buf, "V");
+    snprintf(buf, sizeof(buf), "%.1fV", s.battery_v);
+    _drawMetricBox(BOT3_X, BOT_Y, BOT_W, BOT_H, buf, "");
 }
 
 // Slides in with ease-out, fades out via lerp565 — never pops.
@@ -176,32 +246,27 @@ void SceneDashboard::_drawAlertBanner(const UiFx& fx) {
         ? 1.0f
         : 1.0f - Anim::clamp01((float)fx.alert_gone_ms / ALERT_OUT_MS);
 
-    const int y0 = ROW2_Y - 3;
-    const int bh = H - y0 - 2;
-    int y = y0 + (int)((1.0f - in_p) * (H - y0));
+    const int y0 = Lay::BOT_Y - 3;
+    const int bh = Lay::H - y0 - 2;
+    int y = y0 + (int)((1.0f - in_p) * (Lay::H - y0));
 
     bool on = Anim::pulse(fx.now_ms, ALERT_PULSE_MS);
-    uint16_t bg     = Anim::lerp565(C_SKY, on ? C_REDD : C_DKRED, fade);
-    uint16_t border = Anim::lerp565(C_SKY, C_WHITE, fade);
-    _spr.fillRoundRect(2, y, W - 4, bh, 3, bg);
-    _spr.drawRoundRect(2, y, W - 4, bh, 3, border);
+    uint16_t bg     = Anim::lerp565(Col::SKY, on ? Col::ACCENT : Col::DKRED, fade);
+    uint16_t border = Anim::lerp565(Col::SKY, Col::WHITE, fade);
+    _spr.fillRoundRect(2, y, Lay::W - 4, bh, Lay::BOX_R, bg);
+    _spr.drawRoundRect(2, y, Lay::W - 4, bh, Lay::BOX_R, border);
 
     char msg[32];
     snprintf(msg, sizeof(msg), "%s %s", fx.alert_info, fx.alert_note);
-    _spr.setFont(&lgfx::fonts::Font2);
-    _spr.setTextSize(1);
-    _spr.setTextColor(border, bg);
-    _spr.setTextDatum(lgfx::MC_DATUM);
-    _spr.drawString(msg, W / 2, y + bh / 2);
-    _spr.setTextDatum(lgfx::TL_DATUM);
+    _drawCenteredText(msg, 2, y, Lay::W - 4, bh, &lgfx::fonts::Font2, border);
 }
 
 // Scrolling checkered band, navy/white on the light theme
 void SceneDashboard::_drawCheckerStrip(int y, int h, uint32_t ms) {
-    _spr.fillRect(0, y, W, h, C_WHITE);
+    _spr.fillRect(0, y, Lay::W, h, Col::WHITE);
     int off = (int)((ms / 80) % (uint32_t)(2 * h));
-    for (int x = -2 * h; x < W; x += 2 * h)
-        _spr.fillRect(x + off, y, h, h, C_NAVY);
+    for (int x = -2 * h; x < Lay::W; x += 2 * h)
+        _spr.fillRect(x + off, y, h, h, Col::INK);
 }
 
 // ── Phase screens ────────────────────────────────────────────────────────────
@@ -210,43 +275,39 @@ void SceneDashboard::_renderBoot(const VehicleState& s, const UiFx& fx) {
     uint32_t t = fx.phase_ms;
 
     if (t < BOOT_LOGO_MS) {
-        // Wordmark fade-in from the sky background
+        _drawFrame();
         float p = Anim::easeOutCubic(Anim::progress(t, 0, BOOT_LOGO_MS));
         _spr.setFont(&lgfx::fonts::Font4);
         _spr.setTextSize(1);
-        _spr.setTextColor(Anim::lerp565(C_SKY, C_NAVY, p), C_SKY);
+        _spr.setTextColor(Anim::lerp565(Col::SKY, Col::INK, p));
         _spr.setTextDatum(lgfx::MC_DATUM);
-        _spr.drawString("ULTRA4", W / 2, 32);
+        _spr.drawString("ULTRA4", Lay::W / 2, 32);
         if (p > 0.5f) {
             _spr.setFont(&lgfx::fonts::Font0);
-            _spr.setTextColor(Anim::lerp565(C_SKY, C_REDD, (p - 0.5f) * 2.0f),
-                              C_SKY);
-            _spr.drawString("MICRODASH RC", W / 2, 56);
+            _spr.setTextColor(Anim::lerp565(Col::SKY, Col::ACCENT,
+                                            (p - 0.5f) * 2.0f));
+            _spr.drawString("MICRODASH RC", Lay::W / 2, 56);
         }
         _spr.setTextDatum(lgfx::TL_DATUM);
 
     } else if (t < BOOT_LOGO_MS + BOOT_SWEEP_MS) {
-        // Gauge check: band sweeps 0→max→0, hero shows all-8s
+        // Gauge check: the gear highlight sweeps 1→7→1
+        _drawFrame();
         float sweep = Anim::triangle(Anim::progress(t, BOOT_LOGO_MS, BOOT_SWEEP_MS));
-        _drawBand(sweep * SIM_MAX_RPM, false, 0);
-        _drawHero(8888.0f);
+        _drawGearBar(1 + (int)(sweep * (Lay::BAR_SEGS - 1) + 0.5f), false);
+        _drawSwoosh();
+        _drawRPM(8888.0f);
         _drawGearBox(8, false, fx);
-        _spr.setFont(&lgfx::fonts::Font0);
-        _spr.setTextColor(C_NAVY, C_SKY);
-        _spr.setTextDatum(lgfx::TC_DATUM);
-        _spr.drawString("SELF CHECK", W / 2, ROW2_Y + 4);
-        _spr.setTextDatum(lgfx::TL_DATUM);
+        _drawCenteredText("SELF CHECK", 0, Lay::BOT_Y, Lay::W, Lay::BOT_H,
+                          &lgfx::fonts::Font0, Col::INK);
 
     } else {
-        // Values settle on the real (idle) state + READY pulse
         _renderLive(s, fx, RunStats{});
         if (Anim::pulse(t, 220)) {
-            _drawPanel(50, 28, 60, 22);
-            _spr.setFont(&lgfx::fonts::Font2);
-            _spr.setTextColor(C_NAVY, C_PANEL);
-            _spr.setTextDatum(lgfx::MC_DATUM);
-            _spr.drawString("READY", W / 2, 39);
-            _spr.setTextDatum(lgfx::TL_DATUM);
+            _spr.fillRoundRect(50, 28, 60, 22, Lay::BOX_R, Col::BOX_BG);
+            _spr.drawRoundRect(50, 28, 60, 22, Lay::BOX_R, Col::INK);
+            _drawCenteredText("READY", 50, 28, 60, 22,
+                              &lgfx::fonts::Font2, Col::INK);
         }
     }
 }
@@ -256,71 +317,64 @@ void SceneDashboard::_renderLive(const VehicleState& s, const UiFx& fx,
     bool live = fx.phase == Phase::LIVE;
     bool flash_on = fx.redline && Anim::pulse(fx.now_ms, SHIFT_FLASH_MS);
 
-    // Smoothed display values (core logic)
-    _speedF.update(s.speed_mph, fx.now_ms, SPEED_SMOOTH_MS, SPEED_SMOOTH_MS);
-    float rpm_band = _rpmF.update(s.rpm, fx.now_ms,
-                                  RPM_ATTACK_MS, RPM_RELEASE_MS);
-    // Engine-vibration micro-shake, LIVE only, amplitude ∝ RPM
-    int vib = live ? Noise::vibPx(fx.now_ms, rpm_band / SIM_MAX_RPM,
-                                  VIB_MAX_PX, VIB_PERIOD_MS,
-                                  SIM_NOISE_SEED + 7) : 0;
-
-    _drawBand(rpm_band, flash_on, vib);
-    _drawHero(s.rpm);                   // raw: RPM jitter keeps it alive
+    _drawFrame();
+    _drawGearBar(s.gear, flash_on);
+    _drawSwoosh();
+    _drawRPM(s.rpm);                    // raw: RPM jitter keeps it alive
     _drawGearBox(s.gear, s.drive_auto, fx);
     _drawRows(s, stats);
 
     _drawAlertBanner(fx);
 
-    // Redline: whole-frame border flash red/white
+    // Redline: frame border flash red/white
     if (fx.redline) {
-        uint16_t bc = flash_on ? C_REDD : C_WHITE;
-        _spr.drawRect(0, 0, W, H, bc);
-        _spr.drawRect(1, 1, W - 2, H - 2, bc);
+        uint16_t bc = flash_on ? Col::ACCENT : Col::WHITE;
+        _spr.drawRoundRect(Lay::FRAME_X, Lay::FRAME_Y,
+                           Lay::FRAME_W, Lay::FRAME_H, Lay::FRAME_R, bc);
+        _spr.drawRoundRect(Lay::FRAME_X + 1, Lay::FRAME_Y + 1,
+                           Lay::FRAME_W - 2, Lay::FRAME_H - 2,
+                           Lay::FRAME_R - 1, bc);
     }
 
     // BOOT→LIVE reveal: horizontal wipe, coordinated with the navigator
     if (live && fx.phase_ms < LIVE_WIPE_MS) {
-        int x = (int)(W * Ease::inOutQuad(
+        int x = (int)(Lay::W * Ease::inOutQuad(
                     Anim::progress(fx.phase_ms, 0, LIVE_WIPE_MS)));
-        if (x < W) _spr.fillRect(x, 0, W - x, H, C_SKY);
+        if (x < Lay::W) _spr.fillRect(x, 0, Lay::W - x, Lay::H, Col::SKY);
     }
 }
 
 void SceneDashboard::_renderFinish(const VehicleState& s, const UiFx& fx,
                                    const RunStats& stats) {
+    _drawFrame();
+
     // Instruments power down in sequence before the result screen
     if (fx.phase_ms < FINISH_SHUTDOWN_MS) {
         float p = (float)fx.phase_ms / FINISH_SHUTDOWN_MS;
         if (p < 0.25f) _drawRows(s, stats);
-        if (p < 0.45f) _drawBand(_rpmF.value, false, 0);
+        if (p < 0.45f) { _drawGearBar(s.gear, false); _drawSwoosh(); }
         if (p < 0.70f) _drawGearBox(s.gear, s.drive_auto, fx);
-        if (p < 0.85f) _drawHero(s.rpm);
+        if (p < 0.85f) _drawRPM(s.rpm);
         return;
     }
 
     _drawCheckerStrip(0, 8, fx.now_ms);
-    _drawCheckerStrip(H - 8, 8, fx.now_ms);
+    _drawCheckerStrip(Lay::H - 8, 8, fx.now_ms);
 
-    _spr.setFont(&lgfx::fonts::Font4);
-    _spr.setTextSize(1);
-    _spr.setTextColor(C_NAVY, C_SKY);
-    _spr.setTextDatum(lgfx::TC_DATUM);
-    _spr.drawString("FINISH", W / 2, 12);
-    _spr.setTextDatum(lgfx::TL_DATUM);
+    _drawCenteredText("FINISH", 0, 12, Lay::W, 26,
+                      &lgfx::fonts::Font4, Col::INK);
 
     char buf[10];
     Fmt::speed(buf, stats.max_speed_mph, USE_KMH);
-    _drawValueUnit(6, 46, 70, 22, buf, USE_KMH ? "KMH MAX" : "MPH MAX");
+    _drawMetricBox(6, 46, 70, 22, buf, USE_KMH ? "KMH" : "MPH");
     Fmt::rpm(buf, stats.max_rpm);
-    _drawValueUnit(84, 46, 70, 22, buf, "RPM");
+    _drawMetricBox(84, 46, 70, 22, buf, "RPM");
 }
 
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
 void SceneDashboard::render(const VehicleState& s, const UiFx& fx,
                             const RunStats& stats) {
-    _spr.fillScreen(C_SKY);
     switch (fx.phase) {
         case Phase::BOOT:   _renderBoot(s, fx);               break;
         case Phase::FINISH: _renderFinish(s, fx, stats);      break;
