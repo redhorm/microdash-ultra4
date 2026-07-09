@@ -39,7 +39,7 @@ private:
                           const char* value, const lgfx::IFont* val_font,
                           uint16_t val_color, const char* unit,
                           int val_dy = 0);
-    void _drawGearBox(int g, bool drive_auto, const UiFx& fx);
+    void _drawGearBox(int g, const UiFx& fx);
     void _drawMetricBox(int x, int y, int w, int h,
                         const char* value, const char* label,
                         bool degree = false);

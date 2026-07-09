@@ -160,11 +160,11 @@ void SceneDashboard::_drawFramedValue(int x, int y, int w, int h,
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
 
-// Big gear letter, red on a lighter box (reference style)
-void SceneDashboard::_drawGearBox(int g, bool drive_auto, const UiFx& fx) {
+// Big gear digit, red on a lighter box — numeric like the navigator
+void SceneDashboard::_drawGearBox(int g, const UiFx& fx) {
     using namespace Lay;
     char buf[4];
-    Fmt::gear(buf, g, drive_auto);
+    Fmt::gear(buf, g, false);
 
     bool flash_on = fx.redline && Anim::pulse(fx.now_ms, SHIFT_FLASH_MS);
     _spr.fillRoundRect(GBOX_X, GBOX_Y, GBOX_W, GBOX_H, GBOX_R, Col::BOX_HI);
@@ -310,7 +310,7 @@ void SceneDashboard::_renderBoot(const VehicleState& s, const UiFx& fx) {
         _drawFramedValue(Lay::RPMBOX_X, Lay::RPMBOX_Y, Lay::RPMBOX_W,
                          Lay::RPMBOX_H, "8888", &lgfx::fonts::Font4,
                          Col::INK, "RPM", 2);
-        _drawGearBox(8, false, fx);
+        _drawGearBox(8, fx);
         _drawCenteredText("SELF CHECK", 0, Lay::BOT_Y, Lay::W, Lay::BOT_H,
                           &lgfx::fonts::Font0, Col::INK);
 
@@ -340,7 +340,7 @@ void SceneDashboard::_renderLive(const VehicleState& s, const UiFx& fx,
     snprintf(rv, sizeof(rv), "%d", (int)s.rpm);   // raw: jitter keeps it alive
     _drawFramedValue(Lay::RPMBOX_X, Lay::RPMBOX_Y, Lay::RPMBOX_W, Lay::RPMBOX_H,
                      rv, &lgfx::fonts::Font4, Col::INK, "RPM", 2);
-    _drawGearBox(s.gear, s.drive_auto, fx);
+    _drawGearBox(s.gear, fx);
     _drawRows(s, stats);
 
     _drawAlertBanner(fx);
@@ -372,7 +372,7 @@ void SceneDashboard::_renderFinish(const VehicleState& s, const UiFx& fx,
         float p = (float)fx.phase_ms / FINISH_SHUTDOWN_MS;
         if (p < 0.25f) _drawRows(s, stats);
         if (p < 0.45f) { _drawRPMBar(_rpmF.value, false); _drawSwoosh(); }
-        if (p < 0.70f) _drawGearBox(s.gear, s.drive_auto, fx);
+        if (p < 0.70f) _drawGearBox(s.gear, fx);
         if (p < 0.85f) {
             char rv[8];
             snprintf(rv, sizeof(rv), "%d", (int)s.rpm);
