@@ -21,7 +21,8 @@ private:
     LGFX_Sprite        _spr;
     lgfx::LGFX_Device& _disp;
 
-    Follow _rpmF;   // RPM bar smoothing, VU-meter attack/release
+    Follow _rpmF;    // RPM bar smoothing, VU-meter attack/release
+    Follow _speedF;  // speed readout smoothing
 
     // Phase screens
     void _renderBoot(const VehicleState& s, const UiFx& fx);
@@ -34,7 +35,7 @@ private:
     void _drawFrame();
     void _drawRPMBar(float rpm, bool flash_on);
     void _drawSwoosh();
-    void _drawRPM(float rpm);
+    void _drawHeroRow(float speed_mph, float rpm);
     void _drawGearBox(int g, bool drive_auto, const UiFx& fx);
     void _drawMetricBox(int x, int y, int w, int h,
                         const char* value, const char* label,

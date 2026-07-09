@@ -37,8 +37,10 @@ constexpr int SEG_W = BAR_W / BAR_SEGS;              // 5 px (4 + 1 gap)
 // racing swoosh under the bar
 constexpr int SWOOSH_Y = 18;
 
-// central RPM area (lowered so it doesn't crowd the bar above)
-constexpr int RPM_X = 8, RPM_Y = 25, RPM_W = 95, RPM_H = 22;
+// central hero row: big SPEED + smaller red RPM, shared baseline
+// (lowered so it doesn't crowd the bar above)
+constexpr int HERO_X = 8, HERO_Y = 25, HERO_H = 22;
+constexpr int HERO_R = 108;          // right edge (before the gear box)
 
 // gear box right
 constexpr int GBOX_X = 112, GBOX_Y = 21, GBOX_W = 40, GBOX_H = 30, GBOX_R = 4;
@@ -131,28 +133,37 @@ void SceneDashboard::_drawSwoosh() {
     }
 }
 
-// Dominant RPM readout, value+unit centered as a group on one baseline
-void SceneDashboard::_drawRPM(float rpm) {
+// Hero row on one baseline: dominant red RPM (left, the red number
+// right under the RPM bar needs no label) + smaller speed with MPH
+// unit, right-aligned before the gear box.
+void SceneDashboard::_drawHeroRow(float rpm, float speed_mph) {
     using namespace Lay;
+    int bl = HERO_Y + HERO_H - 1;               // shared baseline
+    _spr.setTextSize(1);
+    _spr.setTextDatum(lgfx::BL_DATUM);
+
+    // RPM — protagonist
     char val[8];
     snprintf(val, sizeof(val), "%d", (int)rpm);
+    _spr.setFont(&lgfx::fonts::Font4);          // 26 px
+    _spr.setTextColor(Col::ACCENT);
+    _spr.drawString(val, HERO_X, bl);
 
-    _spr.setTextSize(1);
-    _spr.setFont(&lgfx::fonts::Font4);          // 26 px value
-    int vw = _spr.textWidth(val);
-    _spr.setFont(&lgfx::fonts::Font2);          // 16 px unit
-    int uw = _spr.textWidth("RPM");
-    int total = vw + 5 + uw;
-    int x0 = RPM_X + (RPM_W - total) / 2;
-    int bl = RPM_Y + RPM_H - 1;                 // shared baseline
-
-    _spr.setTextDatum(lgfx::BL_DATUM);
-    _spr.setFont(&lgfx::fonts::Font4);
-    _spr.setTextColor(Col::ACCENT);          // red value
-    _spr.drawString(val, x0, bl);
+    // speed — secondary, right-aligned
+    char sv[8];
+    Fmt::speed(sv, speed_mph, USE_KMH);
+    const char* unit = USE_KMH ? "KMH" : "MPH";
+    _spr.setFont(&lgfx::fonts::Font2);          // 16 px
+    int vw = _spr.textWidth(sv);
+    _spr.setFont(&lgfx::fonts::Font0);
+    int uw = _spr.textWidth(unit);
+    int x0 = HERO_R - (vw + 3 + uw);
     _spr.setFont(&lgfx::fonts::Font2);
     _spr.setTextColor(Col::INK);
-    _spr.drawString("RPM", x0 + vw + 5, bl - 1);
+    _spr.drawString(sv, x0, bl);
+    _spr.setFont(&lgfx::fonts::Font0);
+    _spr.setTextColor(Col::INK_MID);
+    _spr.drawString(unit, x0 + vw + 3, bl - 2);
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
 
@@ -301,7 +312,7 @@ void SceneDashboard::_renderBoot(const VehicleState& s, const UiFx& fx) {
         float sweep = Anim::triangle(Anim::progress(t, BOOT_LOGO_MS, BOOT_SWEEP_MS));
         _drawRPMBar(sweep * (REDLINE_RPM - 100.0f), false);
         _drawSwoosh();
-        _drawRPM(8888.0f);
+        _drawHeroRow(8888.0f, 88.0f);
         _drawGearBox(8, false, fx);
         _drawCenteredText("SELF CHECK", 0, Lay::BOT_Y, Lay::W, Lay::BOT_H,
                           &lgfx::fonts::Font0, Col::INK);
@@ -325,9 +336,11 @@ void SceneDashboard::_renderLive(const VehicleState& s, const UiFx& fx,
     _drawFrame();
     float rpm_bar = _rpmF.update(s.rpm, fx.now_ms,
                                  RPM_ATTACK_MS, RPM_RELEASE_MS);
+    float spd = _speedF.update(s.speed_mph, fx.now_ms,
+                               SPEED_SMOOTH_MS, SPEED_SMOOTH_MS);
     _drawRPMBar(rpm_bar, flash_on);
     _drawSwoosh();
-    _drawRPM(s.rpm);                    // raw: RPM jitter keeps it alive
+    _drawHeroRow(s.rpm, spd);           // raw rpm: jitter keeps it alive
     _drawGearBox(s.gear, s.drive_auto, fx);
     _drawRows(s, stats);
 
@@ -361,7 +374,7 @@ void SceneDashboard::_renderFinish(const VehicleState& s, const UiFx& fx,
         if (p < 0.25f) _drawRows(s, stats);
         if (p < 0.45f) { _drawRPMBar(_rpmF.value, false); _drawSwoosh(); }
         if (p < 0.70f) _drawGearBox(s.gear, s.drive_auto, fx);
-        if (p < 0.85f) _drawRPM(s.rpm);
+        if (p < 0.85f) _drawHeroRow(s.rpm, _speedF.value);
         return;
     }
 
