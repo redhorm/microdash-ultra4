@@ -80,23 +80,28 @@ void SceneDashboard::_drawValueUnit(int x, int y, int w, int h,
     _spr.setTextDatum(lgfx::TL_DATUM);
 }
 
-// RPM band: 7 gradient cells (1000 RPM each), redline cells strobe
+// RPM band: 7 gradient zones of 1000 RPM, filled CONTINUOUSLY like a
+// real tach needle (the current cell fills partially — all-or-nothing
+// cells looked frozen while cruising inside one 1000-RPM zone).
 void SceneDashboard::_drawBand(float rpm, bool flash_on, int vib_y) {
     int y = BAND_Y + vib_y;
     int cell_w = BAND_W / BAND_CELLS;   // 22 px
 
     for (int i = 0; i < BAND_CELLS; i++) {
-        bool lit = rpm >= (i + 1) * 1000.0f;
-        uint16_t col = lit ? C_RAMP[i] : C_CELL;
-        if (i >= 5 && flash_on) col = C_WHITE;   // redline strobe (6-7k)
-        _spr.fillRect(BAND_X + i * cell_w, y, cell_w - 1, BAND_H, col);
+        int x0 = BAND_X + i * cell_w;
+        int w  = cell_w - 1;
+        float p = Anim::clamp01((rpm - i * 1000.0f) / 1000.0f);
+        int lit = (int)(p * w + 0.5f);
+        uint16_t col = (i >= 5 && flash_on) ? C_WHITE : C_RAMP[i];
+        if (lit > 0) _spr.fillRect(x0, y, lit, BAND_H, col);
+        if (lit < w) _spr.fillRect(x0 + lit, y, w - lit, BAND_H, C_CELL);
 
         char n[2] = {(char)('1' + i), 0};
         _spr.setFont(&lgfx::fonts::Font0);
         _spr.setTextSize(1);
-        _spr.setTextColor(C_NAVY, col);
+        _spr.setTextColor(C_NAVY);           // transparent bg over the fill
         _spr.setTextDatum(lgfx::TC_DATUM);
-        _spr.drawString(n, BAND_X + i * cell_w + cell_w / 2, y + 3);
+        _spr.drawString(n, x0 + cell_w / 2, y + 3);
     }
     _spr.setTextDatum(lgfx::TL_DATUM);
     _spr.drawRoundRect(BAND_X - 1, y - 1, BAND_W + 2, BAND_H + 2, 2, C_NAVY);
