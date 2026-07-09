@@ -173,6 +173,69 @@ static void test_sim_dt_clamp() {
     TEST_ASSERT_TRUE(sim.state.odo_mi < 0.1f);   // clamped to 200 ms
 }
 
+static void test_sim_gear_no_chatter_at_steady_speed() {
+    // 32 mph sits inside the hysteresis band (DOWN[3]=30, UP[2]=35);
+    // 12 mph is the hairpin case that flickered 1↔2 with the old table.
+    const float speeds[] = {32.0f, 12.0f};
+    for (float hold : speeds) {
+        Simulator sim;
+        sim.reset();
+        sim.setInputs(0.2f, 0.0f);
+        for (int i = 0; i < 150; i++) {          // 5 s to settle the gear
+            sim.state.speed_mph = hold;
+            sim.update(33);
+        }
+        int changes = 0, prev = sim.state.gear;
+        for (int i = 0; i < 300; i++) {          // observe 10 s
+            sim.state.speed_mph = hold;
+            sim.update(33);
+            if (sim.state.gear != prev) { changes++; prev = sim.state.gear; }
+        }
+        TEST_ASSERT_EQUAL_INT(0, changes);
+    }
+}
+
+static void test_sim_shift_cooldown_spacing() {
+    Simulator sim;
+    sim.reset();
+    sim.setInputs(0.95f, 0.0f);
+    uint32_t t = 0;
+    while (sim.state.gear < 4 && t < 30000) { sim.update(33); t += 33; }
+    TEST_ASSERT_EQUAL_INT(4, sim.state.gear);
+
+    // slam the speed down: downshifts must step SIM_SHIFT_COOLDOWN_MS apart
+    sim.setInputs(0.0f, 0.0f);
+    sim.state.speed_mph = 10.0f;
+    int prev = sim.state.gear;
+    uint32_t last_change = 0, min_gap = 0xFFFFFFFF, changes = 0;
+    for (uint32_t e = 0; e < 5000; e += 33) {
+        sim.state.speed_mph = 10.0f;     // hold
+        sim.update(33);
+        if (sim.state.gear != prev) {
+            if (changes > 0 && e - last_change < min_gap) min_gap = e - last_change;
+            last_change = e;
+            changes++;
+            prev = sim.state.gear;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(1, sim.state.gear);          // walked 4→3→2→1
+    TEST_ASSERT_TRUE(changes >= 3);
+    TEST_ASSERT_TRUE(min_gap >= SIM_SHIFT_COOLDOWN_MS - 40);
+}
+
+static void test_sim_hits_rev_limiter_before_shifts() {
+    Simulator sim;
+    sim.reset();
+    sim.setInputs(0.95f, 0.0f);
+    float max_rpm = 0.0f;
+    for (int i = 0; i < 360; i++) {      // 12 s of hard acceleration
+        sim.update(33);
+        if (sim.state.rpm > max_rpm) max_rpm = sim.state.rpm;
+    }
+    TEST_ASSERT_TRUE(max_rpm >= REDLINE_RPM);   // bounces on the limiter
+    TEST_ASSERT_TRUE(sim.state.gear >= 4);      // and still shifts up
+}
+
 // ── Driver (roadbook-aware autopilot) ────────────────────────────────────────
 
 static void test_driver_brakes_into_danger_waypoint() {
@@ -704,6 +767,10 @@ int main(int, char**) {
     RUN_TEST(test_sim_values_stay_in_bounds);
     RUN_TEST(test_sim_odometer_advances);
     RUN_TEST(test_sim_dt_clamp);
+
+    RUN_TEST(test_sim_gear_no_chatter_at_steady_speed);
+    RUN_TEST(test_sim_shift_cooldown_spacing);
+    RUN_TEST(test_sim_hits_rev_limiter_before_shifts);
 
     RUN_TEST(test_driver_brakes_into_danger_waypoint);
     RUN_TEST(test_driver_accelerates_on_straight);

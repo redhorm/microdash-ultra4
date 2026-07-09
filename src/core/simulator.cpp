@@ -7,18 +7,23 @@ static float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Gear thresholds (mph): shift up above [gear], down below [gear]
-static const float UP_MPH[SIM_NUM_GEARS + 1]   = {0, 0, 18, 32, 52, 72};
-static const float DOWN_MPH[SIM_NUM_GEARS + 1] = {0, 0,  8, 22, 38, 56};
-// Effective wheel-RPM-to-engine-RPM multipliers per gear.
-// Tuned with RPM_PER_MPH so each up-shift point lands just past
-// REDLINE_RPM (shift-light drama) and drops to ~4000 after the shift.
-static const float GEAR_RATIO[SIM_NUM_GEARS + 1] = {0, 3.6f, 2.2f, 1.35f, 0.95f, 0.72f};
+// Gear thresholds indexed by the CURRENT gear: UP[g] = speed to leave
+// gear g upward, DOWN[g] = speed to leave it downward. Hysteresis:
+// after a downshift into g, UP[g] must still be above the current
+// speed or the box chatters (the old table had UP[1]=0: first gear
+// upshifted at ANY speed — that was the visible gear flicker).
+static const float UP_MPH[SIM_NUM_GEARS + 1]   = {0, 22, 35, 49, 66, 999};
+static const float DOWN_MPH[SIM_NUM_GEARS + 1] = {0,  0, 19, 30, 44,  61};
+// Race gearing: each gear revs PAST the 7200 limiter target before its
+// up-shift speed, so the engine bounces on the limiter at every shift,
+// then drops to ~4-5k in the next gear. Top gear cruises 70 mph @ ~4.2k.
+static const float GEAR_RATIO[SIM_NUM_GEARS + 1] = {0, 3.6f, 2.2f, 1.55f, 1.12f, 0.67f};
 static const float RPM_PER_MPH = 90.0f;
 
 void Simulator::reset() {
     state = VehicleState{};
-    _elapsed_ms = 0;
+    _elapsed_ms   = 0;
+    _last_shift_ms = 0;
     _external   = false;
     _bat_base   = state.battery_v;
     _bat_sag_v  = 0.0f;
@@ -73,11 +78,16 @@ void Simulator::_updatePowertrain(float dt_s) {
     state.speed_mph += accel * dt_s;
     state.speed_mph = clampf(state.speed_mph, 0.0f, SIM_MAX_SPEED_MPH);
 
-    // Gear logic
-    if (state.speed_mph >= UP_MPH[state.gear] && state.gear < SIM_NUM_GEARS)
-        state.gear++;
-    else if (state.speed_mph < DOWN_MPH[state.gear] && state.gear > 1)
-        state.gear--;
+    // Gear logic — sequential box: one shift, then a cooldown
+    if (_elapsed_ms - _last_shift_ms >= SIM_SHIFT_COOLDOWN_MS) {
+        if (state.speed_mph >= UP_MPH[state.gear] && state.gear < SIM_NUM_GEARS) {
+            state.gear++;
+            _last_shift_ms = _elapsed_ms;
+        } else if (state.speed_mph < DOWN_MPH[state.gear] && state.gear > 1) {
+            state.gear--;
+            _last_shift_ms = _elapsed_ms;
+        }
+    }
 
     // RPM: blend engine speed from wheel speed + direct throttle blip
     float wheel_rpm = state.speed_mph * GEAR_RATIO[state.gear] * RPM_PER_MPH;

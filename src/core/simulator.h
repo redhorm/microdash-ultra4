@@ -18,7 +18,8 @@ public:
     float brake()    const { return _brake; }
 
 private:
-    uint32_t _elapsed_ms = 0;
+    uint32_t _elapsed_ms    = 0;
+    uint32_t _last_shift_ms = 0;   // sequential-box shift cooldown
     bool     _external   = false;
     float    _bat_base   = 14.4f;  // slow-moving battery voltage
     float    _bat_sag_v  = 0.0f;   // transient voltage sag under load

@@ -68,6 +68,7 @@
 #define SIM_MAX_RPM       7200.0f
 #define SIM_IDLE_RPM       800.0f
 #define SIM_NUM_GEARS        5
+#define SIM_SHIFT_COOLDOWN_MS 450   // tempo minimo tra due cambiate
 
 // ----------------------------------------------------------------
 // Demo driver (autopilot roadbook-aware)
@@ -101,7 +102,7 @@
 #define BOOT_TOTAL_MS       3800   // ≥ fine di entrambe le timeline
 
 // Shift light / redline
-#define REDLINE_RPM        5700.0f
+#define REDLINE_RPM        6900.0f  // flash = rev limiter (7200)
 #define SHIFT_FLASH_MS       110   // semiperiodo lampeggio bordo/barra
 #define GEAR_SNAP_MS         100   // durata snap del numero marcia
 #define GEAR_SNAP_SCALE      1.3f  // scala iniziale dello snap (130%)
